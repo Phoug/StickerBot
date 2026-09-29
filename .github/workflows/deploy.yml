@@ -23,7 +23,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd ~/stiker-bot
+            cd ~/sticker-bot
             git checkout main
             git pull origin main
             docker compose down
