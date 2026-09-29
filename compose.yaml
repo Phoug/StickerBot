@@ -1,6 +1,8 @@
 services:
   api:
-    build: .
+    image: sticker-bot:latest
+    build:
+      context: .
     command:
       - python3
       - -m
@@ -14,7 +16,8 @@ services:
       - .env
 
   bot:
-    build: .
+    image: sticker-bot:latest
+    pull_policy: never
     command:
       - python3
       - bot.py
