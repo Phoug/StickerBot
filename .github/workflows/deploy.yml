@@ -114,7 +114,7 @@ jobs:
           overwrite: true
 
       - name: Start release on server
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@v1.0.3
 
         env:
           IMAGE_TAG: ${{ needs.build.outputs.version }}
