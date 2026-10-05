@@ -1,13 +1,15 @@
 import os
+import shutil
 import tempfile
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, File, UploadFile
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field, HttpUrl
 
-from downloader import DownloadFailed, download_to_memory
+from downloader import DownloadFailed, download_to_file
 from extractor import ExtractError, get_video_info
 from sticker_converter import StickerConversionError, convert_video_to_sticker, validate_sticker_file
 
@@ -15,6 +17,7 @@ app = FastAPI(
     title="Video Extractor API",
     version="1.0.0",
 )
+
 
 class FormatInfo(BaseModel):
     format_id: str | None = None
@@ -46,9 +49,7 @@ class VideoInfo(BaseModel):
     uploader_url: str | None = None
     duration: float | None = None
     thumbnail: str | None = None
-    thumbnails: list[dict] = Field(
-        default_factory=list
-    )
+    thumbnails: list[dict] = Field(default_factory=list)
     webpage_url: str | None = None
     extractor: str | None = None
     extractor_key: str | None = None
@@ -58,9 +59,19 @@ class VideoInfo(BaseModel):
     repost_count: int | None = None
     timestamp: int | None = None
     upload_date: str | None = None
-    formats: list[FormatInfo] = Field(
-        default_factory=list
-    )
+    formats: list[FormatInfo] = Field(default_factory=list)
+
+
+def _cleanup_files(*paths: str | Path) -> None:
+    for path in paths:
+        try:
+            p = Path(path)
+            if p.is_file():
+                p.unlink()
+            elif p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+        except OSError:
+            pass
 
 
 @app.get("/health")
@@ -90,7 +101,6 @@ def info(
             str(url),
             only_with_video=only_with_video,
         )
-
     except ExtractError as exc:
         raise HTTPException(
             status_code=422,
@@ -124,12 +134,11 @@ def download(
     ),
 ):
     try:
-        data, filename, mime_type = download_to_memory(
+        file_path, filename, mime_type = download_to_file(
             str(url),
             format_id=format_id,
             name=name,
         )
-
     except DownloadFailed as exc:
         raise HTTPException(
             status_code=422,
@@ -137,7 +146,6 @@ def download(
         ) from exc
 
     headers = {
-        "Content-Length": str(len(data)),
         "Cache-Control": "no-store",
     }
 
@@ -146,11 +154,20 @@ def download(
             f"attachment; filename*=UTF-8''{quote(filename)}"
         )
 
-    return Response(
-        content=data,
-        media_type=mime_type,
-        headers=headers,
+    cleanup = BackgroundTask(
+        _cleanup_files,
+        file_path,
+        file_path.parent,
     )
+
+    return FileResponse(
+        path=file_path,
+        media_type=mime_type,
+        filename=filename,
+        headers=headers,
+        background=cleanup,
+    )
+
 
 @app.post("/convert/sticker")
 def convert_sticker(
@@ -175,49 +192,37 @@ def convert_sticker(
             detail="No input filename provided",
         )
 
-    input_suffix = (
-        os.path.splitext(video.filename)[1]
-        or ".mp4"
-    )
+    input_suffix = Path(video.filename).suffix or ".mp4"
 
-    input_fd, input_path = tempfile.mkstemp(
+    with tempfile.NamedTemporaryFile(
         suffix=input_suffix,
         prefix="sticker_input_",
-    )
-    os.close(input_fd)
+        delete=False,
+    ) as tmp_input:
+        input_path = Path(tmp_input.name)
 
     try:
-        with open(input_path, "wb") as output:
-            while chunk := video.file.read(1024 * 1024):
-                output.write(chunk)
-
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
     except OSError as exc:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-
+        _cleanup_files(input_path)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save uploaded video: {exc}",
         ) from exc
-
     finally:
         video.file.close()
 
     try:
-        output_path, duration = (
-            convert_video_to_sticker(
-                input_path=input_path,
-                start=start,
-                end=end,
-            )
+        output_path_str, duration = convert_video_to_sticker(
+            input_path=str(input_path),
+            start=start,
+            end=end,
         )
-
-        validate_sticker_file(output_path)
-
+        output_path = Path(output_path_str)
+        validate_sticker_file(str(output_path))
     except StickerConversionError as exc:
-        if os.path.exists(input_path):
-            os.remove(input_path)
-
+        _cleanup_files(input_path)
         raise HTTPException(
             status_code=422,
             detail=str(exc),
@@ -238,11 +243,3 @@ def convert_sticker(
             "X-Sticker-Duration": f"{duration:.3f}",
         },
     )
-
-def _cleanup_files(*paths: str) -> None:
-    for path in paths:
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-        except OSError:
-            pass
