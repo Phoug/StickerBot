@@ -35,8 +35,8 @@ Before setting up the project, ensure you have the following installed on your s
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/Phoug/sticker-bot
-cd sticker-bot
+git clone https://github.com/Phoug/StickerBot
+cd StickerBot
 ```
 
 ### 2. Set Up a Virtual Environment
