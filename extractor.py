@@ -23,36 +23,19 @@ YDL_BASE_OPTIONS: dict[str, Any] = {
 def _extract_info(url: str) -> dict:
     try:
         with YoutubeDL(YDL_BASE_OPTIONS) as ydl:
-            info = ydl.extract_info(
-                url,
-                download=False,
-            )
-
+            info = ydl.extract_info(url, download=False)
     except DownloadError as exc:
         raise ExtractError(str(exc)) from exc
-
     except Exception as exc:
-        raise ExtractError(
-            f"Unexpected error: {exc}"
-        ) from exc
+        raise ExtractError(f"Unexpected error: {exc}") from exc
 
     if not info:
-        raise ExtractError(
-            "yt-dlp returned empty metadata"
-        )
+        raise ExtractError("yt-dlp returned empty metadata")
 
     if info.get("_type") == "playlist":
-        entries = [
-            entry
-            for entry in (info.get("entries") or [])
-            if entry
-        ]
-
+        entries = [entry for entry in (info.get("entries") or []) if entry]
         if not entries:
-            raise ExtractError(
-                "Playlist is empty"
-            )
-
+            raise ExtractError("Playlist is empty")
         info = entries[0]
 
     return info
@@ -62,8 +45,11 @@ def _normalize_format(fmt: dict) -> dict:
     video_codec = fmt.get("vcodec")
     audio_codec = fmt.get("acodec")
 
+    has_video = video_codec not in (None, "none")
+    has_audio = audio_codec not in (None, "none")
+
     return {
-        "format_id": fmt.get("format_id"),
+        "format_id": str(fmt.get("format_id")),
         "ext": fmt.get("ext"),
         "resolution": fmt.get("resolution"),
         "width": fmt.get("width"),
@@ -78,32 +64,9 @@ def _normalize_format(fmt: dict) -> dict:
         "vbr": fmt.get("vbr"),
         "protocol": fmt.get("protocol"),
         "url": fmt.get("url"),
-        "has_audio": audio_codec not in (None, "none"),
-        "has_video": video_codec not in (None, "none"),
+        "has_audio": has_audio,
+        "has_video": has_video,
     }
-
-
-def _format_score(fmt: dict) -> tuple:
-    height = fmt.get("height") or 0
-    fps = fmt.get("fps") or 0
-    tbr = fmt.get("tbr") or 0
-
-    has_audio = (
-        fmt.get("acodec") not in (None, "none")
-    )
-    has_video = (
-        fmt.get("vcodec") not in (None, "none")
-    )
-    is_mp4 = fmt.get("ext") == "mp4"
-
-    return (
-        int(has_video),
-        int(has_audio),
-        int(is_mp4),
-        height,
-        fps,
-        tbr,
-    )
 
 
 def _extract_formats(
@@ -113,29 +76,17 @@ def _extract_formats(
     formats: list[dict] = []
 
     for fmt in info.get("formats") or []:
-        if not fmt.get("format_id"):
+        if not fmt.get("format_id") or not fmt.get("url"):
             continue
 
-        if not fmt.get("url"):
-            continue
-
-        has_video = fmt.get("vcodec") not in (
-            None,
-            "none",
-        )
+        has_video = fmt.get("vcodec") not in (None, "none")
 
         if only_with_video and not has_video:
             continue
 
-        formats.append(
-            _normalize_format(fmt)
-        )
+        formats.append(_normalize_format(fmt))
 
-    formats.sort(
-        key=_format_score,
-        reverse=True,
-    )
-
+    formats.reverse()
     return formats
 
 
@@ -144,11 +95,7 @@ def get_video_info(
     only_with_video: bool = True,
 ) -> dict:
     info = _extract_info(url)
-
-    formats = _extract_formats(
-        info,
-        only_with_video=only_with_video,
-    )
+    formats = _extract_formats(info, only_with_video=only_with_video)
 
     return {
         "source_url": url,

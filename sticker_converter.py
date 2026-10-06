@@ -12,7 +12,7 @@ MAX_DURATION = 3.0
 MAX_FILE_SIZE = 256 * 1024
 MAX_OUTPUT_SIZE = 255 * 1024
 
-FFMPEG_TIMEOUT = 180
+FFMPEG_TIMEOUT = 120
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess:
@@ -71,6 +71,7 @@ def _encode(
     duration: float,
     fps: int,
     crf: int,
+    bitrate_kbit: int | None = None,
 ) -> None:
     filter_chain = (
         "scale=512:512:"
@@ -101,24 +102,40 @@ def _encode(
         "yuva420p",
         "-auto-alt-ref",
         "0",
-        "-b:v",
-        "0",
-        "-crf",
-        str(crf),
+    ]
+
+    if bitrate_kbit:
+        command.extend([
+            "-b:v",
+            f"{bitrate_kbit}k",
+            "-maxrate",
+            f"{bitrate_kbit}k",
+            "-bufsize",
+            f"{bitrate_kbit * 2}k",
+        ])
+    else:
+        command.extend([
+            "-b:v",
+            "0",
+            "-crf",
+            str(crf),
+        ])
+
+    command.extend([
         "-deadline",
-        "good",
+        "realtime",
         "-cpu-used",
-        "4",
+        "5",
         "-row-mt",
         "1",
         "-tile-columns",
         "2",
         "-frame-parallel",
-        "0",
+        "1",
         "-metadata",
         "title=Telegram Video Sticker",
         output_path,
-    ]
+    ])
 
     _run_command(command)
 
@@ -129,26 +146,19 @@ def _convert_with_quality_search(
     start: float,
     duration: float,
 ) -> None:
+    target_bitrate_kbit = int((MAX_OUTPUT_SIZE * 8) / (duration * 1000) * 0.85)
+
     attempts = [
-        (30, 30),
-        (34, 30),
-        (38, 30),
-        (42, 30),
-        (46, 30),
-        (50, 30),
-        (40, 24),
-        (44, 24),
-        (48, 24),
-        (50, 20),
-        (50, 15),
+        (32, 30, None),
+        (40, 30, None),
+        (48, 25, None),
+        (52, 20, target_bitrate_kbit),
     ]
 
     last_size = 0
 
-    for index, (crf, fps) in enumerate(attempts):
-        attempt_path = (
-            f"{output_path}.attempt{index}.webm"
-        )
+    for index, (crf, fps, b_rate) in enumerate(attempts):
+        attempt_path = f"{output_path}.attempt{index}.webm"
 
         try:
             _encode(
@@ -158,16 +168,14 @@ def _convert_with_quality_search(
                 duration=duration,
                 fps=fps,
                 crf=crf,
+                bitrate_kbit=b_rate,
             )
 
             size = os.path.getsize(attempt_path)
             last_size = size
 
             if size <= MAX_OUTPUT_SIZE:
-                os.replace(
-                    attempt_path,
-                    output_path,
-                )
+                os.replace(attempt_path, output_path)
                 return
 
         finally:
@@ -187,57 +195,39 @@ def convert_video_to_sticker(
     start: float = 0.0,
     end: float | None = None,
 ) -> tuple[str, float]:
-    input_path = str(Path(input_path))
+    input_file = Path(input_path)
 
-    if not os.path.isfile(input_path):
-        raise StickerConversionError(
-            "Input video does not exist"
-        )
+    if not input_file.is_file():
+        raise StickerConversionError("Input video does not exist")
 
     if start < 0:
-        raise StickerConversionError(
-            "Start time cannot be negative"
-        )
+        raise StickerConversionError("Start time cannot be negative")
 
-    source_duration = _probe_duration(
-        input_path
-    )
+    source_duration = _probe_duration(str(input_file))
 
     if start >= source_duration:
-        raise StickerConversionError(
-            "Start time is outside the source video"
-        )
+        raise StickerConversionError("Start time is outside the source video")
 
     if end is None:
-        end = min(
-            source_duration,
-            start + MAX_DURATION,
-        )
+        end = min(source_duration, start + MAX_DURATION)
 
     if end <= start:
-        raise StickerConversionError(
-            "End time must be greater than start time"
-        )
+        raise StickerConversionError("End time must be greater than start time")
 
     duration = end - start
 
     if duration > MAX_DURATION:
-        raise StickerConversionError(
-            "Sticker duration cannot exceed 3 seconds"
-        )
+        raise StickerConversionError("Sticker duration cannot exceed 3 seconds")
 
     if output_path is None:
-        fd, output_path = tempfile.mkstemp(
-            suffix=".webm",
-            prefix="telegram_sticker_",
-        )
-        os.close(fd)
+        with tempfile.NamedTemporaryFile(suffix=".webm", prefix="telegram_sticker_", delete=False) as tmp:
+            output_path = tmp.name
 
     output_path = str(Path(output_path))
 
     try:
         _convert_with_quality_search(
-            input_path=input_path,
+            input_path=str(input_file),
             output_path=output_path,
             start=start,
             duration=duration,
@@ -251,19 +241,13 @@ def convert_video_to_sticker(
 
 
 def validate_sticker_file(path: str) -> None:
-    if not os.path.isfile(path):
-        raise StickerConversionError(
-            "Output file does not exist"
-        )
+    path_obj = Path(path)
 
-    size = os.path.getsize(path)
+    if not path_obj.is_file():
+        raise StickerConversionError("Output file does not exist")
 
-    if size > MAX_FILE_SIZE:
-        raise StickerConversionError(
-            "Output file exceeds Telegram's 256 KB limit"
-        )
+    if path_obj.stat().st_size > MAX_FILE_SIZE:
+        raise StickerConversionError("Output file exceeds Telegram's 256 KB limit")
 
-    if not path.lower().endswith(".webm"):
-        raise StickerConversionError(
-            "Output file is not WebM"
-        )
+    if path_obj.suffix.lower() != ".webm":
+        raise StickerConversionError("Output file is not WebM")
