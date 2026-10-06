@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 import re
@@ -95,7 +94,7 @@ def parse_sticker_args(text: str | None) -> tuple[float, float | None]:
 
     arguments = parts[1:]
     if len(arguments) > 2:
-        raise ValueError("Usage: <code>/sticker 5 8</code>")
+        raise ValueError("Usage: <code>/sticker</code>")
 
     start = 0.0
     end = None
@@ -287,100 +286,7 @@ async def process_sticker_generation(
                 pass
 
 
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-    await message.answer(
-        "<b>Video Downloader & Sticker Bot</b>\n\n"
-        "Send a video link to download it in original quality.\n\n"
-        "<b>Supported platforms:</b>\n"
-        "YouTube, TikTok, Instagram, X/Twitter.\n\n"
-        "You can also upload a video file directly with <code>/sticker</code> in the caption, "
-        "or reply to an existing video with <code>/sticker</code>."
-    )
-
-
-@dp.message(Command("help"))
-async def help_handler(message: Message):
-    await message.answer(
-        "<b>Available Commands:</b>\n\n"
-        "<code>/start</code> — Bot overview\n"
-        "<code>/help</code> — Command list\n"
-        "<code>/sticker</code> — Convert video to a video sticker\n"
-        "<code>/sticker 5 8</code> — Convert a segment from 5 to 8 seconds\n\n"
-        "Or simply send a link to download a video."
-    )
-
-
-@dp.message(Command("sticker"))
-async def sticker_command_handler(message: Message):
-    target_message = None
-
-    if message.video or message.document:
-        target_message = message
-    elif message.reply_to_message and (message.reply_to_message.video or message.reply_to_message.document):
-        target_message = message.reply_to_message
-
-    if not target_message:
-        await message.answer("Please send a video with <code>/sticker</code> in caption or reply to a video message.")
-        return
-
-    try:
-        caption_or_text = message.caption or message.text
-        start, end = parse_sticker_args(caption_or_text)
-    except ValueError as exc:
-        await message.answer(f"Invalid timestamp format.\n{html_quote(str(exc))}")
-        return
-
-    await process_sticker_generation(target_message, message, start, end)
-
-
-@dp.message(F.video)
-async def video_handler(message: Message):
-    file_size = message.video.file_size or 0
-    if file_size > MAX_TELEGRAM_DOWNLOAD_SIZE:
-        await message.answer("File exceeds Telegram bot download limit (20 MB).")
-        return
-
-    await message.answer(
-        "Video received!\n\n"
-        "Reply to it with <code>/sticker</code> to convert it into a video sticker.\n"
-        "For a custom range: reply with <code>/sticker 5 8</code>"
-    )
-
-
-@dp.message(F.document)
-async def document_handler(message: Message):
-    doc = message.document
-    if not doc:
-        return
-
-    filename = doc.file_name or ""
-    mime_type = doc.mime_type or ""
-
-    is_video = mime_type.startswith("video/") or filename.lower().endswith(
-        (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
-    )
-
-    if not is_video:
-        await message.answer("Please send a valid video file.")
-        return
-
-    if (doc.file_size or 0) > MAX_TELEGRAM_DOWNLOAD_SIZE:
-        await message.answer("File exceeds Telegram bot download limit (20 MB).")
-        return
-
-    await message.answer(
-        "Video file received!\n\nReply to it with <code>/sticker</code> for conversion."
-    )
-
-
-@dp.message(F.text)
-async def url_handler(message: Message):
-    url = extract_url(message.text or "")
-    if not url:
-        await message.answer("Please send a valid video link or upload a video file.")
-        return
-
+async def process_video_download(message: Message, url: str):
     status_message = await message.answer("Analyzing link...")
 
     try:
@@ -417,6 +323,101 @@ async def url_handler(message: Message):
             await status_message.edit_text(f"Error: {html_quote(error_msg)}")
         except Exception:
             pass
+
+
+@dp.message(CommandStart())
+async def start_handler(message: Message):
+    await message.answer(
+        "<b>Video Downloader & Sticker Bot</b>\n\n"
+        "Send a video link to download it in original quality.\n\n"
+        "<b>Supported platforms:</b>\n"
+        "YouTube, TikTok, Instagram, X/Twitter.\n\n"
+        "You can also upload a video file directly with <code>/sticker</code> in the caption, "
+        "or reply to an existing video with <code>/sticker</code>."
+    )
+
+
+@dp.message(Command("help"))
+async def help_handler(message: Message):
+    await message.answer(
+        "<b>Available Commands:</b>\n\n"
+        "<code>/start</code> — Bot overview\n"
+        "<code>/help</code> — Command list\n"
+        "<code>/sticker</code> — Convert video to a video sticker\n\n"
+        "Or simply send a link to download a video."
+    )
+
+
+@dp.message(Command("sticker"))
+async def sticker_command_handler(message: Message):
+    target_message = None
+
+    if message.video or message.document:
+        target_message = message
+    elif message.reply_to_message and (message.reply_to_message.video or message.reply_to_message.document):
+        target_message = message.reply_to_message
+
+    if not target_message:
+        await message.answer("Please send a video with <code>/sticker</code> in caption or reply to a video message.")
+        return
+
+    try:
+        caption_or_text = message.caption or message.text
+        start, end = parse_sticker_args(caption_or_text)
+    except ValueError as exc:
+        await message.answer(f"Invalid timestamp format.\n{html_quote(str(exc))}")
+        return
+
+    await process_sticker_generation(target_message, message, start, end)
+
+
+@dp.message(F.video)
+async def video_handler(message: Message):
+    file_size = message.video.file_size or 0
+    if file_size > MAX_TELEGRAM_DOWNLOAD_SIZE:
+        await message.answer("File exceeds Telegram bot download limit (20 MB).")
+        return
+
+    await message.answer(
+        "Video received!\n\n"
+        "Reply to it with <code>/sticker</code> to convert it into a video sticker."
+    )
+
+
+@dp.message(F.document)
+async def document_handler(message: Message):
+    doc = message.document
+    if not doc:
+        return
+
+    filename = doc.file_name or ""
+    mime_type = doc.mime_type or ""
+
+    is_video = mime_type.startswith("video/") or filename.lower().endswith(
+        (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
+    )
+
+    if not is_video:
+        await message.answer("Please send a valid video file.")
+        return
+
+    if (doc.file_size or 0) > MAX_TELEGRAM_DOWNLOAD_SIZE:
+        await message.answer("File exceeds Telegram bot download limit (20 MB).")
+        return
+
+    await message.answer(
+        "Video file received!\n\nReply to it with <code>/sticker</code> for conversion."
+    )
+
+
+@dp.message(F.text)
+async def url_handler(message: Message):
+    url = extract_url(message.text or "")
+    if not url:
+        await message.answer("Please send a valid video link or upload a video file.")
+        return
+
+    await process_video_download(message, url)
 
 
 async def main():
