@@ -115,4 +115,3 @@ python bot.py
 - **Download Video**: Simply paste a supported link (e.g., YouTube, TikTok, Instagram) into the chat.
 - **Create Video Sticker**:
   - Upload a video file or reply to an existing video with `/sticker`.
-  - Specify a time range: `/sticker 5 8` (converts seconds 5 to 8 into a sticker).
