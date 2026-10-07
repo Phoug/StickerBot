@@ -14,6 +14,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
+    BotCommand,
+    BotCommandScopeDefault,
     CallbackQuery,
     FSInputFile,
     InlineKeyboardButton,
@@ -33,6 +35,7 @@ load_dotenv()
 
 API_BASE_URL = os.getenv("VIDEO_API_URL", "http://127.0.0.1:8000").rstrip("/")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_SECRET_TOKEN = os.getenv("API_SECRET_TOKEN")
 
 MAX_TELEGRAM_DOWNLOAD_SIZE = 20 * 1024 * 1024
 MAX_TELEGRAM_UPLOAD_SIZE = 50 * 1024 * 1024
@@ -267,14 +270,35 @@ def get_content_disposition_filename(header: str | None) -> str | None:
     return None
 
 
+async def set_bot_commands(bot: Bot):
+    commands_en = [
+        BotCommand(command="start", description="Bot overview"),
+        BotCommand(command="help", description="Command list"),
+        BotCommand(command="sticker", description="Convert video to a video sticker"),
+        BotCommand(command="lang", description="Change language of application"),
+    ]
+
+    commands_ru = [
+        BotCommand(command="start", description="Обзор бота"),
+        BotCommand(command="help", description="Список команд"),
+        BotCommand(command="sticker", description="Преобразовать видео в стикер"),
+        BotCommand(command="lang", description="Сменить язык приложения"),
+    ]
+
+    await bot.set_my_commands(commands_en, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(commands_ru, scope=BotCommandScopeDefault(), language_code="ru")
+
+
 async def get_http_session() -> aiohttp.ClientSession:
     global http_session
     if http_session is None or http_session.closed:
         timeout = aiohttp.ClientTimeout(total=HTTP_TIMEOUT)
         connector = aiohttp.TCPConnector(limit=20, ttl_dns_cache=300)
+        headers = {"X-API-Key": API_SECRET_TOKEN}
         http_session = aiohttp.ClientSession(
             timeout=timeout,
             connector=connector,
+            headers=headers,
         )
     return http_session
 
@@ -558,6 +582,7 @@ async def url_handler(message: Message, tr: Callable):
 
 async def main():
     await get_http_session()
+    await set_bot_commands(bot)
     try:
         await dp.start_polling(
             bot,

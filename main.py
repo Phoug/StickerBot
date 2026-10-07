@@ -1,21 +1,41 @@
 import os
+import secrets
 import shutil
 import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Query, File, UploadFile
+from fastapi import FastAPI, HTTPException, Query, File, UploadFile, Depends, Security
+from fastapi.security import APIKeyHeader
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
+from starlette.status import HTTP_401_UNAUTHORIZED
 from pydantic import BaseModel, Field, HttpUrl
 
 from downloader import DownloadFailed, download_to_file
 from extractor import ExtractError, get_video_info
 from sticker_converter import StickerConversionError, convert_video_to_sticker, validate_sticker_file
 
+API_SECRET_TOKEN = os.getenv("API_SECRET_TOKEN")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def verify_api_key(api_key: str = Security(api_key_header)):
+    if not api_key or not secrets.compare_digest(api_key, API_SECRET_TOKEN):
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key
+
+
 app = FastAPI(
     title="Video Extractor API",
     version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    dependencies=[Depends(verify_api_key)],
 )
 
 
@@ -116,17 +136,11 @@ def download(
     ),
     format_id: str | None = Query(
         None,
-        description=(
-            "Format ID returned by /info. "
-            "If omitted, the best available quality is selected."
-        ),
+        description="Format ID returned by /info",
     ),
     name: str | None = Query(
         None,
-        description=(
-            "Output filename without extension. "
-            "If omitted, a source name is used."
-        ),
+        description="Output filename without extension",
     ),
     as_attachment: bool = Query(
         True,
