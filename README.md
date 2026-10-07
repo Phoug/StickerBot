@@ -84,6 +84,8 @@ BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyZ
 
 # Backend API Service Base URL (Default: http://127.0.0.1:8000)
 VIDEO_API_URL=http://127.0.0.1:8000
+
+API_SECRET_TOKEN=6Y2OYplsgzo3pYVqj-hoag
 ```
 
 ---
