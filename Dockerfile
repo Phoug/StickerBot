@@ -1,5 +1,7 @@
-# Dev image to build
-FROM dhi.io/python:3.14-dev AS builder
+# syntax=docker/dockerfile:1
+
+# Сборка Python-зависимостей
+FROM dhi.io/python:3.14-debian13-dev AS builder
 
 WORKDIR /app
 
@@ -8,18 +10,34 @@ ENV PATH="/venv/bin:$PATH"
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
-    pip install -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt
 
-# Use the minimal runtime image. It runs as nonroot by default.
-FROM dhi.io/python:3.14
+
+# Runtime с FFmpeg
+FROM dhi.io/python:3.14-debian13-dev AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder /venv /venv
+COPY --from=builder --chown=65532:65532 /venv /venv
+COPY --chown=65532:65532 . .
+
 ENV PATH="/venv/bin:$PATH"
 
-# Copy the source code into the container.
-COPY . .
+# DHI runtime обычно работает с UID 65532.
+# Возвращаем непривилегированного пользователя после apt-get.
+USER 65532:65532
 
-# Expose the port that the application listens on.
 EXPOSE 8000
+
+CMD [
+  "/venv/bin/python3",
+  "-m",
+  "uvicorn",
+  "main:app",
+  "--host=0.0.0.0",
+  "--port=8000"
+]
