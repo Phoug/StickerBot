@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 
 # Runtime с FFmpeg
-FROM dhi.io/python:3.14-debian13-dev AS runtime
+FROM python:3.14-slim-trixie AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
@@ -27,10 +27,8 @@ COPY --chown=65532:65532 . .
 
 ENV PATH="/venv/bin:$PATH"
 
-# DHI runtime обычно работает с UID 65532.
-# Возвращаем непривилегированного пользователя после apt-get.
 USER 65532:65532
 
 EXPOSE 8000
 
-CMD [ "/venv/bin/python3", "-m",  "uvicorn",  "main:app",  "--host=0.0.0.0",  "--port=8000" ]
+CMD [ "/venv/bin/python3", "-m", "uvicorn", "main:app", "--host=0.0.0.0", "--port=8000" ]
