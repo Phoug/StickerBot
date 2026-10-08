@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Сборка Python-зависимостей
-FROM dhi.io/python:3.14-debian13-dev AS builder
+FROM python:3.14-slim-trixie AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,6 @@ ENV PATH="/venv/bin:$PATH"
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     pip install --no-cache-dir -r requirements.txt
-
 
 # Runtime с FFmpeg
 FROM python:3.14-slim-trixie AS runtime
