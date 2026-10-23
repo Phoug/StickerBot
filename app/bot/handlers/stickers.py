@@ -4,8 +4,8 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from app.services.sticker_service import process_sticker_generation
-from app.utils import parse_sticker_args
+from app.bot.services.sticker_service import process_sticker_generation
+from app.bot.utils import parse_sticker_args
 
 router = Router()
 

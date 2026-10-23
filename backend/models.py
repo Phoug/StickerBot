@@ -42,38 +42,3 @@ class VideoInfo(BaseModel):
     timestamp: int | None = None
     upload_date: str | None = None
     formats: list[FormatInfo] = Field(default_factory=list)
-
-
-class TelegramLoginRequest(BaseModel):
-    phone: str = Field(..., min_length=5, max_length=32)
-
-
-class TelegramVerifyRequest(BaseModel):
-    code: str | None = Field(default=None, min_length=3, max_length=12)
-    password: str | None = Field(default=None, max_length=256)
-
-
-class TelegramUserResponse(BaseModel):
-    connected: bool
-    user_id: int | None = None
-    username: str | None = None
-    first_name: str | None = None
-    last_name: str | None = None
-
-
-class StickerSetResponse(BaseModel):
-    id: int
-    access_hash: int | None = None
-    title: str
-    short_name: str
-    count: int
-    creator: bool = False
-    animated: bool = False
-    videos: bool = False
-    emojis: bool = False
-    masks: bool = False
-
-
-class StickerSetsResponse(BaseModel):
-    count: int
-    sets: list[StickerSetResponse]

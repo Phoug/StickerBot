@@ -2,8 +2,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from app.keyboards.language import get_language_keyboard
-from app.localization import USER_LANGUAGES, translator_for
+from app.bot.keyboards.language import get_language_keyboard
+from app.bot.localization import USER_LANGUAGES, translator_for
 
 router = Router()
 

@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from app.config import URL_PATTERN
+from app.bot.config import URL_PATTERN
 
 
 def extract_url(text: str) -> str | None:

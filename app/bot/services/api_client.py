@@ -3,14 +3,14 @@ from pathlib import Path
 
 import aiohttp
 
-from app.config import (
+from app.bot.config import (
     API_BASE_URL,
     API_SECRET_TOKEN,
     CHUNK_SIZE,
     HTTP_TIMEOUT,
     MAX_TELEGRAM_UPLOAD_SIZE,
 )
-from app.utils import get_content_disposition_filename, safe_filename
+from app.bot.utils import get_content_disposition_filename, safe_filename
 
 logger = logging.getLogger("telegram_bot.api")
 

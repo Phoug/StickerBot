@@ -1,9 +1,9 @@
 from aiogram import F, Router
 from aiogram.types import Message
 
-from app.config import MAX_TELEGRAM_DOWNLOAD_SIZE
-from app.services.video_service import process_video_download
-from app.utils import extract_url
+from app.bot.config import MAX_TELEGRAM_DOWNLOAD_SIZE
+from app.bot.services.video_service import process_video_download
+from app.bot.utils import extract_url
 
 router = Router()
 

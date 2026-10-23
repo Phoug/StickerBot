@@ -1,6 +1,6 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
-from app.config import WEBAPP_URL
+from app.bot.config import WEBAPP_URL
 
 
 def get_language_keyboard() -> InlineKeyboardMarkup:

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#151714">
+  <title>Sticker Studio</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+<main class="shell">
+  <header class="topbar"><button id="back" class="icon-button hidden" aria-label="Назад">←</button><a class="brand" href="#home"><span class="brand-icon">s</span> sticker studio<span class="beta">BETA</span></a></header>
+  <div id="error" role="alert" class="notice hidden"></div>
+  <div id="auth-notice" class="notice hidden">Откройте приложение из Telegram-бота. Вход по телефону не нужен.</div>
+
+  <section id="home" class="screen">
+    <div class="eyebrow">ВАШИ ИДЕИ. ВАШИ СТИКЕРЫ.</div>
+    <h1>Маленькие кадры.<br><span>Большие эмоции.</span></h1>
+    <p class="intro">Соберите любимые моменты в набор.<br>Из видео — в стикер, прямо здесь.</p>
+    <div class="section-heading"><h2>Мои наборы <span id="pack-count" class="counter">0</span></h2><button id="create" class="button compact">＋ Создать</button></div>
+    <div id="packs" class="pack-grid"></div>
+    <div id="empty" class="empty hidden"><div class="sticker-doodle">☺</div><h3>Первый набор начинается с идеи</h3><p>Создайте новый или перенесите стикеры<br>из существующего набора по ссылке.</p><button id="create-empty" class="button">Создать стикерпак <span>↗</span></button></div>
+    <p class="footnote">Без входа в аккаунт · Без лишних ботов</p>
+  </section>
+
+  <section id="new" class="screen hidden">
+    <div class="eyebrow">ШАГ 01 / НАБОР</div><h1>Начнём с набора</h1><p class="intro">Место для ваших будущих стикеров.</p>
+    <div class="segmented" aria-label="Способ создания"><button id="mode-new" aria-pressed="true" class="selected">Новый набор</button><button id="mode-import" aria-pressed="false">По ссылке</button></div>
+    <form id="pack-form">
+      <label>Название набора<input id="pack-title" maxlength="64" required placeholder="Например, наши реакции"></label>
+      <div id="import-fields" class="hidden"><label>Ссылка на стикерпак<input id="pack-link" type="url" placeholder="https://t.me/addstickers/…"></label><p class="hint">Создадим отдельный набор с теми же стикерами и новой ссылкой. Исходный набор останется без изменений.</p><label class="check"><input id="ownership" type="checkbox">Это мой набор или у меня есть разрешение на копирование.</label></div>
+      <div class="tip"><span>✦</span><p>Название можно выбрать сейчас. Новый набор появится в Telegram после добавления первого стикера.</p></div>
+      <button type="submit" class="button wide" id="create-pack">Создать набор <span>→</span></button>
+    </form>
+  </section>
+
+  <section id="pack" class="screen hidden">
+    <div class="eyebrow">МОЙ СТИКЕРПАК</div><h1 id="current-title"></h1><p id="current-info" class="intro"></p>
+    <div class="pack-actions"><button id="add-sticker" class="button">＋ Добавить стикер</button><a id="telegram-link" class="button secondary hidden" target="_blank" rel="noopener">Открыть в Telegram ↗</a><button id="resume-import" class="button hidden">Продолжить импорт</button></div>
+    <div id="stickers" class="sticker-grid"></div>
+    <div id="pack-empty" class="empty hidden"><div class="sticker-doodle small">＋</div><h3>Здесь будет ваша коллекция</h3><p>Добавьте видео, выберите момент<br>и превратите его в первый стикер.</p></div>
+  </section>
+
+  <section id="source" class="screen hidden">
+    <div class="eyebrow">ШАГ 02 / ВИДЕО</div><h1>Найдите тот<br><span>самый момент.</span></h1><p class="intro">Вставьте ссылку из соцсети или выберите видео на устройстве.</p>
+    <form id="link-form"><label>Ссылка на видео<input id="video-link" type="url" required placeholder="https://…" maxlength="2048"></label><button class="button wide" type="submit">Загрузить по ссылке <span>↓</span></button></form>
+    <p class="hint">YouTube, TikTok, Instagram, VK и другие поддерживаемые сервисы. Только публичные видео; доступность зависит от источника.</p>
+    <div class="divider"><span>ИЛИ</span></div>
+    <label class="upload-box" for="video-file"><span class="upload-icon">↑</span><strong>Выбрать из галереи</strong><span>Видео до 50 МБ · до 10 минут</span><input id="video-file" type="file" accept="video/*"></label>
+  </section>
+
+  <section id="editor" class="screen hidden">
+    <div class="eyebrow">ШАГ 03 / РЕДАКТОР</div><h1>Оставьте главное</h1><p class="intro">Выберите до 3 секунд и настройте кадр.</p>
+    <div id="crop-stage" class="crop-stage"><video id="source-video" muted playsinline preload="metadata"></video><div class="crop-guide"></div></div>
+    <div class="playbar"><button id="play" class="button secondary compact">▶ Фрагмент</button><span id="clip-duration">0.0 / 3 сек</span></div>
+    <div class="time-fields"><label>Начало, сек<input id="start" type="number" min="0" step="0.05" value="0"></label><label>Конец, сек<input id="end" type="number" min="0.05" step="0.05" value="3"></label></div>
+    <label class="range-label">Положение фрагмента<input id="timeline" type="range" min="0" max="0" step="0.05" value="0"></label>
+    <fieldset><legend>Форма стикера</legend><div class="shapes"><button type="button" data-shape="square" class="selected" aria-pressed="true"><i class="shape-square"></i>Квадрат</button><button type="button" data-shape="rounded" aria-pressed="false"><i class="shape-rounded"></i>Скругление</button><button type="button" data-shape="circle" aria-pressed="false"><i class="shape-circle"></i>Круг</button></div></fieldset>
+    <label class="range-label">Масштаб<input id="zoom" type="range" min="1" max="3" step="0.01" value="1"></label>
+    <div class="time-fields"><label class="range-label">По горизонтали<input id="position-x" type="range" min="0" max="1" step="0.01" value="0.5"></label><label class="range-label">По вертикали<input id="position-y" type="range" min="0" max="1" step="0.01" value="0.5"></label></div>
+    <button id="render" class="button wide">Подготовить стикер <span>→</span></button>
+  </section>
+
+  <section id="preview" class="screen hidden">
+    <div class="eyebrow">ШАГ 04 / ГОТОВО К СОХРАНЕНИЮ</div><h1>Как вам результат?</h1><p class="intro">Это готовый стикер. Добавьте эмоцию — и он в наборе.</p>
+    <div class="preview-stage"><video id="result-video" autoplay loop muted playsinline controls></video></div>
+    <label>Эмодзи стикера<select id="emoji"><option>🙂</option><option>😂</option><option>❤️</option><option>🔥</option><option>😍</option><option>😭</option><option>😎</option><option>🤔</option><option>👍</option><option>🎉</option><option>💀</option><option>😡</option></select></label>
+    <button id="publish" class="button wide">Добавить в набор <span>＋</span></button>
+    <button id="edit-again" class="text-button wide">Вернуться к настройке</button>
+  </section>
+</main>
+<div id="busy" class="busy hidden" role="status" aria-live="polite"><div class="busy-card"><span class="spinner"></span><strong id="busy-text">Загрузка…</strong><p>Можно немного подождать.<br>Обработка видео занимает время.</p></div></div>
+</body>
+</html>

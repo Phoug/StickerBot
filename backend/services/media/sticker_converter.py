@@ -52,11 +52,14 @@ def _encode(
     fps: int,
     crf: int,
     bitrate_kbit: int | None = None,
+    custom_filter: str | None = None,
 ) -> None:
     filter_chain = (
         "scale=512:512:force_original_aspect_ratio=decrease:force_divisible_by=2,"
         f"fps={fps},format=yuva420p"
     )
+    if custom_filter:
+        filter_chain = f"{custom_filter},fps={fps},format=yuva420p"
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}",
         "-i", input_path, "-t", f"{duration:.3f}", "-vf", filter_chain, "-an",
@@ -82,6 +85,7 @@ def _convert_with_quality_search(
     output_path: str,
     start: float,
     duration: float,
+    custom_filter: str | None = None,
 ) -> None:
     target_bitrate_kbit = int((MAX_OUTPUT_SIZE * 8) / (duration * 1000) * 0.85)
     attempts = [(32, 30, None), (40, 30, None), (48, 25, None), (52, 20, target_bitrate_kbit)]
@@ -89,7 +93,7 @@ def _convert_with_quality_search(
     for index, (crf, fps, bitrate) in enumerate(attempts):
         attempt_path = f"{output_path}.attempt{index}.webm"
         try:
-            _encode(input_path, attempt_path, start, duration, fps, crf, bitrate)
+            _encode(input_path, attempt_path, start, duration, fps, crf, bitrate, custom_filter)
             last_size = os.path.getsize(attempt_path)
             if last_size <= MAX_OUTPUT_SIZE:
                 os.replace(attempt_path, output_path)

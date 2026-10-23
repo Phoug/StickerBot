@@ -1,0 +1,32 @@
+name: Test Mini App
+
+on:
+  pull_request:
+  push:
+    branches:
+      - 'feat/**'
+      - 'codex/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -r backend/requirements.txt -r app/requirements.txt -r tests/requirements.txt
+      - name: Test API and media conversion
+        run: python -m pytest tests -q
+      - name: Test Mini App flow
+        run: node --test tests/frontend.test.cjs

@@ -1,9 +1,12 @@
 import os
 import re
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT_DIR = Path(__file__).resolve().parents[3]
+if os.getenv("PYTHON_DOTENV_DISABLED") != "1":
+    load_dotenv(ROOT_DIR / ".env")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_BASE_URL = os.getenv("VIDEO_API_URL", "http://127.0.0.1:8000").rstrip("/")

@@ -5,10 +5,10 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, BotCommandScopeDefault
 
-from app.config import BOT_TOKEN
-from app.handlers import language, media, stickers, start
-from app.middleware import LocalizationMiddleware
-from app.services.api_client import backend_client
+from app.bot.config import BOT_TOKEN
+from app.bot.handlers import language, media, stickers, start
+from app.bot.middleware import LocalizationMiddleware
+from app.bot.services.api_client import backend_client
 
 logging.basicConfig(
     level=logging.INFO,

@@ -1,199 +1,87 @@
-# StickerBot
+# Sticker Studio / StickerBot
 
-StickerBot is a Telegram bot and Telegram Mini App backed by a FastAPI service. It can retrieve video information, download supported media, convert short video clips into Telegram-compatible WebM stickers, and provide Telegram account and sticker-set features through Telethon.
+Telegram Mini App для создания стикерпаков и видеостикеров. Вход — через проверенные Telegram Mini App initData. Телефон, коды входа, Telethon и пользовательские сессии не используются.
 
-## Features
+## Сценарий
 
-- Telegram bot commands and language selection.
-- A Telegram Mini App served from the `webapp/` directory.
-- Video information extraction and downloads through `yt-dlp`.
-- Video-to-sticker conversion using FFmpeg and VP9/WebM.
-- Telegram Mini App `initData` validation on the backend.
-- Optional MTProto account sign-in and sticker-set inspection through Telethon.
-- An API key for backend endpoints intended for trusted internal clients.
+1. Открыть Mini App кнопкой в боте.
+2. Создать набор с названием или вставить ссылку на существующий обычный набор.
+3. При импорте создаётся **новый набор с новой ссылкой** и копиями стикеров. Оригинал не изменяется. Копируйте только свои работы или работы, на которые есть разрешение.
+4. Открыть набор и добавить видео по публичной ссылке из соцсети или из галереи.
+5. Выбрать фрагмент до 3 секунд, форму (квадрат / скругление / круг), масштаб и положение.
+6. Посмотреть готовый WebM, выбрать эмодзи и добавить в набор.
 
-## Project structure
+Новый пустой набор хранится как черновик: Telegram требует хотя бы один стикер при создании. После первого сохранения появляется ссылка на набор.
 
-```text
-STICKERBOT/
-├── app/
-│   ├── bot.py
-│   ├── config.py
-│   ├── localization.py
-│   ├── middleware.py
-│   ├── utils.py
-│   ├── handlers/
-│   ├── keyboards/
-│   └── services/
-│
-├── backend/
-│   ├── main.py
-│   ├── config.py
-│   ├── models.py
-│   ├── security.py
-│   ├── routers/
-│   └── services/
-│       └── media/
-│
-├── webapp/
-│   ├── index.html
-│   └── assets/
-├── app/requirements.txt
-├── backend/requirements.txt
-├── run_bot.py
-├── .env
-├── Dockerfile
-└── compose.yaml
-```
+Импорт поддерживает обычные наборы до 120 стикеров, включая статические, TGS и видео. Создание новых стикеров пока только из видео. Маски и custom emoji не импортируются. Незавершённый импорт можно продолжить с экрана набора. Авторство внешнего набора автоматически не проверяется.
 
-The bot and backend are separate application components. `app/` contains Telegram bot code; `backend/` contains the FastAPI application and its services; `webapp/` contains the client-side Mini App. Keep the actual `index.html`, JavaScript, stylesheets, and images in `webapp/`.
+## Структура
 
-## Requirements
+- `app/bot/` — aiogram, команды и кнопка открытия Mini App; прежние команды загрузки и конвертации сохранены.
+- `app/webapp/` — HTML, CSS и JavaScript, без сборщика.
+- `backend/routers/stickers.py` — наборы, импорт, превью из Telegram.
+- `backend/routers/studio.py` — загрузка, обработка, предпросмотр, публикация.
+- `backend/services/media/` — yt-dlp и FFmpeg.
+- `backend/storage.py` — SQLite, привязка наборов и файлов к Telegram user ID.
+- `data/` — приватная база и временные медиа; не доступны через static и не коммитятся.
 
-- Python 3.10 or newer.
-- FFmpeg and `ffprobe` installed and available through `PATH`.
-- An FFmpeg build that supports the `libvpx-vp9` encoder.
-- A Telegram bot token from BotFather.
-- Telegram API ID and API hash if Telethon account features are enabled.
-- A public HTTPS URL for the Mini App when running it inside Telegram.
+## Локальный запуск
 
-Check the FFmpeg installation with:
-
-```bash
-ffmpeg -version
-ffprobe -version
-ffmpeg -hide_banner -encoders
-```
-
-Confirm that `libvpx-vp9` appears in the encoder list.
-
-## Configuration
-
-Create a `.env` file in the project root. Do not commit this file or share its secret values.
-
-```dotenv
-BOT_TOKEN=replace_with_your_bot_token
-API_SECRET_TOKEN=replace_with_a_long_random_secret
-VIDEO_API_URL=http://127.0.0.1:8000
-WEBAPP_URL=https://your-domain.example/app/
-
-TELEGRAM_API_ID=replace_with_your_telegram_api_id
-TELEGRAM_API_HASH=replace_with_your_telegram_api_hash
-TELETHON_SESSIONS_DIR=/absolute/path/to/telegram_sessions
-
-MINI_APP_AUTH_MAX_AGE=3600
-LOGIN_CODE_TTL=600
-LOGIN_CODE_COOLDOWN=60
-MAX_STICKER_SETS=2000
-```
-
-Configuration notes:
-
-- `BOT_TOKEN` is used by the bot and by the backend to validate Telegram Mini App `initData`. Use the same value in both components.
-- `API_SECRET_TOKEN` must be the same in the bot and backend. The bot sends it in the `X-API-Key` header when calling protected media endpoints. Generate a long, unpredictable value.
-- `VIDEO_API_URL` is the base URL used by the bot to reach FastAPI. Use `http://127.0.0.1:8000` for a local process. In Docker Compose, use the backend service name and its internal port, for example `http://backend:8000`, if the service is named `backend`.
-- `WEBAPP_URL` must be the public HTTPS address where the Mini App is available.
-- `TELEGRAM_API_ID` and `TELEGRAM_API_HASH` are required by the backend for Telethon. Obtain them from Telegram's developer portal.
-- `TELETHON_SESSIONS_DIR` should point to a persistent, private directory. Telethon session files contain sensitive account credentials and must never be served as static files or committed to source control.
-
-Do not put `BOT_TOKEN`, `API_SECRET_TOKEN`, `TELEGRAM_API_HASH`, or Telethon session data in frontend JavaScript, HTML, URLs, or logs.
-
-## Installation
-
-Create and activate a virtual environment from the project root.
-
-### Windows PowerShell
+Нужны Python 3.11+, FFmpeg с libx264 и libvpx-vp9, ffprobe.
 
 ```powershell
 py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -r app/requirements.txt
-pip install -r backend/requirements.txt
+.venv/Scripts/python -m pip install -r app/requirements.txt -r backend/requirements.txt
+.venv/Scripts/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+# Во втором терминале:
+.venv/Scripts/python run_bot.py
 ```
 
-### Linux or macOS
+Настройки передаются через окружение или локальный приватный конфигурационный файл:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r app/requirements.txt
-pip install -r backend/requirements.txt
+| Переменная | Назначение |
+| --- | --- |
+| BOT_TOKEN | Токен бота; одинаковый для API и бота |
+| API_SECRET_TOKEN | Общий секрет для прежних серверных медиаэндпоинтов |
+| VIDEO_API_URL | Для бота: локально http://127.0.0.1:8000, в Compose задаётся автоматически |
+| WEBAPP_URL | Публичный HTTPS-адрес Mini App с путём /app/ |
+| DATA_DIR | Каталог базы и медиа; по умолчанию ./data |
+| MINI_APP_AUTH_MAX_AGE | Срок приёма initData в секундах, по умолчанию 86400 |
+
+TELEGRAM_API_ID, TELEGRAM_API_HASH и TELETHON_SESSIONS_DIR больше не нужны. Старые файлы сессий не используются приложением; они исключены из Git и Docker.
+
+Mini App доступен на `/app/`, health check — `/health`. Для Telegram нужен публичный HTTPS-адрес: reverse proxy должен передавать и `/app/`, и `/api/` на FastAPI. При открытии вне Telegram приложение показывает подсказку и не предоставляет доступ к данным. Если сессия истекла, закройте и заново откройте Mini App.
+
+## Ограничения первой версии
+
+- Видео до 50 МБ, 10 минут и 4096×4096; для редактора перекодируется в MP4 до 1280px без звука.
+- Результат: квадратный холст 512×512, до 3 секунд, VP9/WebM до 256 КБ, без звука. У круга и скругления прозрачные углы.
+- Доступность скачивания зависит от соцсети, её ограничений и версии yt-dlp. Приватные видео, DRM и вход по cookies не поддерживаются.
+- Исходники и предпросмотры доступны владельцу в течение часа. Просроченные файлы удаляются фоновым обслуживанием; наборы остаются в базе.
+- Тяжёлая обработка выполняется в пуле потоков, одновременно до двух операций. Пока без отдельной очереди задач: не закрывайте Mini App во время операции.
+- API запускается **одним процессом / одним worker**. Для масштабирования понадобится общая очередь и распределённая блокировка.
+- Готовые стикеры повторно в редакторе не открываются. Удаление и перестановка стикеров пока не реализованы.
+- При импорте сохраняются файлы и основной эмодзи; все дополнительные эмодзи и ключевые слова исходного набора Bot API не возвращает.
+- Надёжность публикации зависит от ответа Telegram. Повторная отправка того же результата не должна дублировать стикер.
+
+## Docker / CI/CD
+
+Dockerfile устанавливает обе группы зависимостей. Один образ используется для FastAPI и бота с разными командами запуска. База и медиа API сохраняются в томе `sticker-data`; не удаляйте этот том при обновлениях.
+
+```powershell
+$env:IMAGE_TAG = "main"
+docker compose up -d
 ```
 
-Installing both requirement files into one virtual environment is convenient for local development. For production, the bot and backend can be built as separate containers, each installing its own requirements file.
+Workflow публикует образ и развёртывает Compose при пуше в main, версионном теге или ручном запуске. Изменения рабочей ветки автоматически не деплоятся. Автоматические тесты пока запускаются отдельно от deploy workflow.
 
-## Running locally
+## Проверки
 
-Start the backend from the project root:
-
-```bash
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```powershell
+.venv/Scripts/python -m pip install -r tests/requirements.txt
+.venv/Scripts/python -m pytest tests -q
+node --check app/webapp/app.js
+node --test tests/frontend.test.cjs
 ```
 
-In a second terminal, activate the same virtual environment and start the bot:
-
-```bash
-python run_bot.py
-```
-
-The bot's `VIDEO_API_URL` must point to the backend address. The backend health endpoint is available at:
-
-```text
-http://127.0.0.1:8000/health
-```
-
-The application must be configured to serve the `webapp/` directory at `/app/` for the Mini App URL shown in `WEBAPP_URL` to work. If the frontend is served by Nginx instead, configure Nginx to serve the static files and adjust the deployment accordingly.
-
-## API overview
-
-The backend includes these routes:
-
-| Route | Purpose | Access |
-|---|---|---|
-| `GET /health` | Health check | Public |
-| `GET /info` | Extract video metadata and formats | Requires `X-API-Key` |
-| `GET /download` | Download a video | Requires `X-API-Key` |
-| `POST /convert/sticker` | Convert an uploaded video into a WebM sticker | Requires `X-API-Key` |
-| `GET /api/telegram/status` | Check the connected Telegram account | Requires valid `X-Telegram-Init-Data` |
-| `POST /api/telegram/login/request-code` | Request an MTProto login code | Requires valid `X-Telegram-Init-Data` |
-| `POST /api/telegram/login/verify` | Verify a login code or 2FA password | Requires valid `X-Telegram-Init-Data` |
-| `POST /api/telegram/logout` | Disconnect the MTProto account | Requires valid `X-Telegram-Init-Data` |
-| `GET /api/sticker-sets` | List the account's sticker sets | Requires valid `X-Telegram-Init-Data` |
-| `GET /api/sticker-sets/{short_name}` | Get details for one sticker set | Requires valid `X-Telegram-Init-Data` |
-
-The exact routes depend on the code currently installed in the project. Keep the bot's API client and backend route definitions aligned when changing endpoint paths or request formats.
-
-## Security and deployment notes
-
-- Serve the Mini App over HTTPS in production.
-- Validate Telegram Mini App `initData` on the backend; never trust a user ID supplied only by frontend JavaScript.
-- Apply authorization checks to every private operation and enforce request, upload, and processing limits.
-- Do not expose the backend API key, Telethon API hash, or session files to the frontend.
-- Keep PostgreSQL, Redis, and internal service ports private if those services are added.
-- Configure persistent private storage for Telethon sessions if users must remain signed in after container restarts.
-- Add resource limits and timeouts for media processing. Do not allow user-controlled file paths.
-- Review `Dockerfile` and `compose.yaml` before deployment to ensure the correct entry point, environment variables, storage mounts, and internal networking are configured.
-
-## Troubleshooting
-
-### The bot cannot connect to the backend
-
-Check that the backend is running and `VIDEO_API_URL` points to the address reachable from the bot process. When using Docker, `127.0.0.1` inside one container refers to that same container, not another service.
-
-### Sticker conversion fails
-
-Check that `ffmpeg` and `ffprobe` are installed and available on `PATH`, and that the FFmpeg build supports `libvpx-vp9`.
-
-### The Mini App does not open
-
-Verify `WEBAPP_URL`, HTTPS availability, and that the configured static-file server serves `webapp/` at the expected `/app/` path.
-
-### Telegram account sign-in fails
-
-Check `TELEGRAM_API_ID` and `TELEGRAM_API_HASH`, network access to Telegram, the session directory's permissions, and whether Telegram requires a 2FA password or a wait period.
-
-## License
-
-Add the project's license here before publishing or distributing it.
+Тесты используют временную базу, фиктивный Bot API и тестовые initData. Реальные токены, пользовательские сессии и приватная конфигурация не читаются. Тесты FFmpeg проверяют фактические размер, длительность, кодек и прозрачность масок.

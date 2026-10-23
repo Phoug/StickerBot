@@ -4,9 +4,9 @@ from html import escape as html_quote
 
 from aiogram.types import FSInputFile, Message
 
-from app.config import MAX_TELEGRAM_UPLOAD_SIZE
-from app.services.api_client import backend_client
-from app.utils import format_size
+from app.bot.config import MAX_TELEGRAM_UPLOAD_SIZE
+from app.bot.services.api_client import backend_client
+from app.bot.utils import format_size
 
 logger = logging.getLogger("telegram_bot.video")
 

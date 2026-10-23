@@ -5,7 +5,7 @@ import time
 from typing import Any
 from urllib.parse import parse_qsl
 
-from fastapi import HTTPException, Security
+from fastapi import Header, HTTPException, Security
 from fastapi.security import APIKeyHeader
 from starlette.status import HTTP_401_UNAUTHORIZED
 
@@ -88,3 +88,7 @@ def get_mini_app_user(init_data: str | None) -> dict[str, Any]:
     if not init_data:
         raise HTTPException(status_code=401, detail="Missing X-Telegram-Init-Data header")
     return validate_telegram_init_data(init_data)["user"]
+
+
+def mini_app_user(x_telegram_init_data: str | None = Header(default=None)):
+    return get_mini_app_user(x_telegram_init_data)

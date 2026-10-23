@@ -2,10 +2,10 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
-from app.keyboards.language import get_main_keyboard
-from app.localization import MESSAGES
-from app.services.video_service import process_video_download
-from app.utils import extract_url
+from app.bot.keyboards.language import get_main_keyboard
+from app.bot.localization import MESSAGES
+from app.bot.services.video_service import process_video_download
+from app.bot.utils import extract_url
 
 router = Router()
 
