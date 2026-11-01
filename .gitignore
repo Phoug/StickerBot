@@ -8,3 +8,6 @@ __pycache__/
 data/
 .pytest_cache/
 tests/.artifacts/
+
+frontend/node_modules/
+app/webapp/

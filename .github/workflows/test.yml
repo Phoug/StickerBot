@@ -28,5 +28,9 @@ jobs:
           python -m pip install -r backend/requirements.txt -r app/requirements.txt -r tests/requirements.txt
       - name: Test API and media conversion
         run: python -m pytest tests -q
-      - name: Test Mini App flow
-        run: node --test tests/frontend.test.cjs
+      - name: Build and test React Mini App
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          npm test

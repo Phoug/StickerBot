@@ -1,5 +1,12 @@
 # syntax=docker/dockerfile:1
 ARG PYTHON_IMAGE=dhi.io/python:3.14-debian13-dev
+FROM node:22-slim AS frontend
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY frontend ./
+RUN npm run build
+
 FROM ${PYTHON_IMAGE} AS builder
 WORKDIR /app
 RUN python3 -m venv /venv
@@ -15,7 +22,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder --chown=65532:65532 /venv /venv
-COPY --chown=65532:65532 app ./app
+COPY --chown=65532:65532 app/bot ./app/bot
+COPY --from=frontend --chown=65532:65532 /app/webapp ./app/webapp
 COPY --chown=65532:65532 backend ./backend
 COPY --chown=65532:65532 run_bot.py .
 RUN mkdir -p /app/data && chown 65532:65532 /app/data

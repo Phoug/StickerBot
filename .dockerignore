@@ -30,3 +30,5 @@ README.md
 **/*.session-journal
 data
 tests
+
+app/webapp

@@ -90,7 +90,7 @@ MOCK_SDK = """<script>
 window.Telegram={WebApp:{initData:'visual-qa',ready(){},expand(){},
 viewportStableHeight:window.innerHeight,safeAreaInset:{top:44,bottom:24,left:0,right:0},contentSafeAreaInset:{top:56,bottom:0,left:0,right:0},
 setHeaderColor(){},setBackgroundColor(){},onEvent(){},
-BackButton:{show(){},hide(){},onClick(){}},HapticFeedback:{notificationOccurred(){}}}};
+BackButton:{show(){},hide(){},onClick(fn){window.qaBack=fn;},offClick(fn){if(window.qaBack===fn)window.qaBack=null;}},HapticFeedback:{notificationOccurred(){}}}};
 </script>"""
 
 
