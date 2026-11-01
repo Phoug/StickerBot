@@ -1,3 +1,4 @@
+import math
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -31,7 +32,7 @@ def parse_time(value: str) -> float:
                 raise ValueError
     except (TypeError, ValueError):
         raise ValueError from None
-    if result < 0:
+    if not math.isfinite(result) or result < 0:
         raise ValueError
     return result
 

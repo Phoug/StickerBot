@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import HttpUrl
 from starlette.background import BackgroundTask
 
+from backend.config import MAX_SOURCE_SIZE
 from backend.models import VideoInfo
 from backend.security import verify_api_key
 from backend.services.file_service import cleanup_files
@@ -68,8 +69,8 @@ def download(
 @router.post("/convert/sticker", dependencies=[Security(verify_api_key)])
 def convert_sticker(
     video: UploadFile = File(..., description="Source video file"),
-    start: float = Form(0.0, ge=0.0, description="Start time in seconds"),
-    end: float | None = Form(None, gt=0.0, description="End time in seconds"),
+    start: float = Form(0.0, ge=0.0, allow_inf_nan=False, description="Start time in seconds"),
+    end: float | None = Form(None, gt=0.0, allow_inf_nan=False, description="End time in seconds"),
 ):
     if not video.filename:
         raise HTTPException(status_code=400, detail="No input filename provided")
@@ -83,9 +84,16 @@ def convert_sticker(
         input_path = Path(tmp_input.name)
 
     try:
+        size = 0
         with input_path.open("wb") as buffer:
             while chunk := video.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_SOURCE_SIZE:
+                    raise HTTPException(413, "Видео должно быть не больше 50 МБ")
                 buffer.write(chunk)
+    except HTTPException:
+        cleanup_files(input_path)
+        raise
     except OSError as exc:
         cleanup_files(input_path)
         raise HTTPException(
