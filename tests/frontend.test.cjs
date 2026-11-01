@@ -28,7 +28,7 @@ class Element {
 function boot(responder, authenticated=true, sdk={}){
   const elements=new Map();
   const get=id=>{if(!elements.has(id))elements.set(id,new Element(id));return elements.get(id);};
-  const screens=["home","new","pack","source","editor","preview"].map(get);
+  const screens=["home","new","pack","source","album","editor","preview"].map(get);
   const shapes=["original","square","rounded","circle"].map(shape=>{const e=new Element(shape);e.dataset.shape=shape;return e;});
   let blobId=0;
   const requests=[];
@@ -279,4 +279,12 @@ test("trim gestures stay within source duration and three second limit",async()=
   vm.runInContext('changeTrim("move",100)',ui.context);assert.equal(Number(ui.get("end").value),60);assert.equal(Number(ui.get("start").value),57);
   vm.runInContext('changeTrim("left",-100)',ui.context);assert.equal(Number(ui.get("start").value),57);
   vm.runInContext('changeTrim("left",100)',ui.context);assert.ok(Number(ui.get("end").value)-Number(ui.get("start").value)>=.0499);
+});
+
+
+test("editor prevents Telegram minimization gestures and restores them on exit",async()=>{
+  const calls=[];
+  const ui=boot(()=>({data:{packs:[]}}),true,{disableVerticalSwipes(){calls.push("lock");},enableVerticalSwipes(){calls.push("unlock");},isVersionAtLeast:()=>true});
+  await idle(ui);vm.runInContext('show("editor");show("editor");show("preview");',ui.context);
+  assert.deepEqual(calls,["lock","unlock"]);
 });

@@ -29,10 +29,19 @@ async function task(message, action) {
   try { await action(); } catch(e) { error(e.message || "Не удалось выполнить операцию"); }
   finally { state.busy=false; $("busy").classList.add("hidden"); document.body.removeAttribute("aria-busy"); }
 }
+let editorSwipesLocked=false;
+function syncEditorSwipes(editing) {
+  if(editing===editorSwipesLocked || !tg?.disableVerticalSwipes || !tg?.enableVerticalSwipes || (tg.isVersionAtLeast && !tg.isVersionAtLeast("7.7")))return;
+  try {
+    if(editing)tg.disableVerticalSwipes();else tg.enableVerticalSwipes();
+    editorSwipesLocked=editing;
+  } catch {}
+}
 function show(screen) {
   finishOrderDrag();
   $("source-video").pause(); $("result-video").pause();
   state.screen = screen;
+  syncEditorSwipes(screen === "editor");
   const workspace=screen === "editor" || screen === "preview";
   document.body.classList.toggle("editing", workspace);
   $("app-shell").classList.toggle("is-editor", workspace);
@@ -95,7 +104,7 @@ function stickerCount(count) {
   return count+" "+word;
 }
 async function loadHome() {
-  finishOrderDrag(); revokeMedia();state.order=null;
+  finishOrderDrag(); revokeMedia();state.order=null;state.album=null;
   const {packs} = await json("/api/packs");
   $("packs").replaceChildren(); $("pack-count").textContent=packs.length;
   $("empty").classList.toggle("hidden", packs.length !== 0);
@@ -154,16 +163,19 @@ function renderStickers() {
         if(!["ArrowUp","ArrowDown"].includes(e.key))return;
         e.preventDefault();moveSticker(sticker.id,state.order.indexOf(sticker.id)+(e.key==="ArrowUp"?-1:1));
       };
-      const field=document.createElement("label");field.className="row-emoji";field.textContent="Эмодзи";
+      const field=document.createElement("label");field.className="row-emoji";
       const emoji=document.createElement("input");emoji.type="text";emoji.value=state.emojiEdits[sticker.id]??sticker.emoji;emoji.maxLength=32;
       emoji.autocomplete="off";emoji.spellcheck=false;emoji.setAttribute("aria-label","Эмодзи стикера "+(index+1));
       emoji.oninput=()=>{state.emojiEdits[sticker.id]=emoji.value;};field.append(emoji);
       tile.append(handle,thumb,field);
       const remove=document.createElement("button");remove.className="icon-button remove-sticker";remove.textContent="✕";remove.setAttribute("aria-label","Удалить стикер "+(index+1));remove.onclick=()=>requestStickerDelete(sticker);tile.append(remove);
     } else {
-      const kind=document.createElement("span");kind.className="sticker-kind";
-      kind.textContent=sticker.is_video?"Видео":sticker.is_animated?"Анимация":"Фото";
-      tile.append(thumb,kind);
+      tile.append(thumb);
+      if(sticker.is_video || sticker.is_animated) {
+        const kind=document.createElement("span");kind.className="sticker-kind";kind.setAttribute("aria-hidden","true");
+        kind.innerHTML='<svg viewBox="0 0 16 16"><path d="m6 4 6 4-6 4Z"/></svg>';
+        tile.append(kind);
+      }
     }
     tile.dataset.stickerId=sticker.id;$("stickers").append(tile); return {tile:thumb,sticker};
   });
@@ -398,7 +410,8 @@ function back() {
   if(state.order){state.order=null;renderStickers();return;}
   error("");
   if(state.screen==="preview"){ show("editor"); updateCrop(); return; }
-  if(state.screen==="editor"){if(state.replacing){state.replacing=null;task("Открываем набор…",()=>openPack(state.pack.id));}else show("source");return;}
+  if(state.screen==="editor"){if(state.album){showAlbum(state.album);return;}if(state.replacing){state.replacing=null;task("Открываем набор…",()=>openPack(state.pack.id));}else show("source");return;}
+  if(state.screen==="album"){show("source");return;}
   if(state.screen==="source"){ task("Открываем набор…",()=>openPack(state.pack.id)); return; }
   task("Загружаем наборы…", loadHome);
 }
@@ -454,10 +467,25 @@ $("confirm-delete").onclick=()=>{
     await loadHome(); tg?.HapticFeedback?.notificationOccurred("success");
   });
 };
-$("add-sticker").onclick=()=>{state.replacing=null;state.publishEmoji="🙂";error("");revokeMedia();$("video-file").value="";show("source");};
-$("link-form").onsubmit=e=>{e.preventDefault();task("Загружаем и подготавливаем видео…",async()=>setSource(await json("/api/studio/link",{url:$("video-link").value.trim()})));};
+$("add-sticker").onclick=()=>{state.album=null;state.replacing=null;state.publishEmoji="🙂";error("");revokeMedia();$("video-file").value="";show("source");};
+function showAlbum(album) {
+  state.album=album;show("album");$("album-photos").replaceChildren();
+  album.photos.forEach((photo,index)=>{
+    const button=document.createElement("button");button.className="album-photo";
+    button.setAttribute("aria-label","Открыть фото "+(index+1));button.textContent=String(index+1);
+    button.onclick=()=>task("Открываем фото…",()=>setSource(photo));$("album-photos").append(button);
+    void mediaURL("/api/studio/media/"+photo.id+"?thumbnail=true").then(url=>{
+      const image=document.createElement("img");image.src=url;image.alt="Фото "+(index+1);button.replaceChildren(image);
+    }).catch(()=>{});
+  });
+}
+$("link-form").onsubmit=e=>{e.preventDefault();task("Загружаем публикацию…",async()=>{
+  const result=await json("/api/studio/link",{url:$("video-link").value.trim()});
+  state.album=null;
+  if(result.kind==="album")showAlbum(result);else await setSource(result);
+});};
 $("video-file").onchange=()=>{
-  const file=$("video-file").files[0]; if(!file)return;
+  state.album=null;const file=$("video-file").files[0]; if(!file)return;
   if(file.size>50*1024*1024){error("Файл должен быть не больше 50 МБ");return;}
   task("Подготавливаем файл…",async()=>{
     const form=new FormData(); form.append("video",file);
@@ -516,9 +544,10 @@ $("edit-again").onclick=()=>{show("editor");updateCrop();};
 $("publish").onclick=()=>task("Сохраняем стикер…",async()=>{
   await json("/api/studio/packs/"+state.pack.id+"/publish",{render_id:state.render.id,emoji:state.publishEmoji,replace_id:state.replacing});
   tg?.HapticFeedback?.notificationOccurred("success");invalidateCover(state.pack.id);revokeMedia();await openPack(state.pack.id);
-  state.replacing=null;state.emojiEdits={};state.order=state.pack.stickers.map(s=>s.id);renderStickers();
+  state.replacing=null;state.album=null;state.emojiEdits={};state.order=state.pack.stickers.map(s=>s.id);renderStickers();
 });
 $("viewer-edit").onclick=()=>{
+  state.album=null;
   const sticker=state.pack.stickers[state.viewerIndex];closeViewer();
   task("Открываем редактор…",async()=>{
     const source=await json("/api/studio/packs/"+state.pack.id+"/stickers/"+encodeURIComponent(sticker.id)+"/edit",{});

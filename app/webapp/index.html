@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#1f1f1f">
   <title>Sticker Studio</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=20261101-2">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="./app.js" defer></script>
+  <script src="./app.js?v=20261101-2" defer></script>
 </head>
 <body>
 <svg class="svg-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
@@ -67,19 +67,24 @@
     <a id="telegram-link" class="action-row hidden" target="_blank" rel="noopener"><svg class="icon"><use href="#i-external"/></svg>Открыть в Telegram</a>
     <div class="pack-actions"><button id="add-sticker" class="action-row"><svg class="icon"><use href="#i-plus"/></svg>Добавить стикер</button><button id="resume-import" class="button hidden">Продолжить импорт</button></div>
     <div class="section-heading"><h2>Стикеры</h2><button id="edit-stickers" class="button secondary compact-button">Редактировать</button></div>
-    <p id="order-hint" class="hint hidden">Перетаскивайте за ручку. Нажмите на поле эмодзи и введите один с клавиатуры.</p>
+    <p id="order-hint" class="hint hidden">Перетаскивайте стикеры и меняйте эмодзи.</p>
     <div id="stickers" class="sticker-grid"></div>
-    <div id="order-actions" class="order-actions hidden"><button id="cancel-order" class="button secondary">Отмена</button><button id="save-order" class="button">Сохранить изменения</button></div>
+    <div id="order-actions" class="order-actions hidden"><button id="cancel-order" class="button secondary">Отмена</button><button id="save-order" class="button">Сохранить</button></div>
     <div id="pack-empty" class="empty compact-empty hidden"><span class="empty-single"><svg><use href="#i-sticker"/></svg></span><h2>Пока ни одного стикера</h2><p>Добавьте фото или видео из галереи.</p></div>
     <button id="delete-pack" class="action-row delete-row"><svg class="icon"><use href="#i-trash"/></svg>Удалить набор</button>
   </section>
 
   <section id="source" class="screen hidden">
-    <h1>Добавить стикер</h1><p class="intro">Выберите фото или видео из галереи либо вставьте ссылку на видео.</p>
-    <form id="link-form"><label>Ссылка на видео<div class="input-with-icon"><svg class="icon"><use href="#i-link"/></svg><input id="video-link" type="url" inputmode="url" required placeholder="Вставьте ссылку" maxlength="2048"></div></label><button class="button wide" type="submit">Загрузить видео<svg class="icon"><use href="#i-arrow"/></svg></button></form>
-    <p class="hint">Публичные видео из YouTube, TikTok, Instagram, VK и других поддерживаемых соцсетей.</p>
+    <h1>Добавить стикер</h1><p class="intro">Выберите фото или видео из галереи либо вставьте ссылку на фото или видео.</p>
+    <form id="link-form"><label>Ссылка на фото или видео<div class="input-with-icon"><svg class="icon"><use href="#i-link"/></svg><input id="video-link" type="url" inputmode="url" required placeholder="Вставьте ссылку" maxlength="2048"></div></label><button class="button wide" type="submit">Загрузить<svg class="icon"><use href="#i-arrow"/></svg></button></form>
+    <p class="hint">Видео из соцсетей, фотопубликации TikTok или прямая ссылка на JPEG, PNG, WebP.</p>
     <div class="divider"><span>или с устройства</span></div>
     <label class="upload-box" for="video-file"><span class="upload-icon"><svg class="icon"><use href="#i-gallery"/></svg></span><strong>Выбрать из галереи</strong><span>Фото или видео · до 50 МБ</span><input id="video-file" type="file" accept="video/*,image/jpeg,image/png,image/webp"></label>
+  </section>
+
+  <section id="album" class="screen hidden">
+    <h1>Выберите фото</h1><p class="intro">Нажмите на снимок, чтобы создать стикер. Остальные фото останутся доступны при возврате из редактора.</p>
+    <div id="album-photos" class="album-photos"></div>
   </section>
 
   <section id="editor" class="screen hidden">
@@ -138,11 +143,12 @@
   <div class="dialog-actions"><button id="cancel-delete" class="button secondary">Оставить набор</button><button id="confirm-delete" class="button danger">Удалить навсегда</button></div>
 </dialog>
 <dialog tabindex="-1" id="sticker-viewer" class="sticker-viewer" aria-label="Просмотр стикера">
-  <div class="viewer-heading"><span id="viewer-position"></span><span id="viewer-kind" class="badge"></span><button id="close-viewer" class="icon-button" aria-label="Закрыть просмотр">✕</button></div>
-  <div id="viewer-media" class="viewer-media" aria-live="polite"></div><p id="viewer-emoji"></p><p id="viewer-status" class="hint" role="status"></p>
-  <div class="viewer-navigation"><button id="previous-sticker" class="icon-button" aria-label="Предыдущий стикер">‹</button><button id="next-sticker" class="icon-button" aria-label="Следующий стикер">›</button></div>
-  <button id="viewer-edit" class="button secondary wide"><svg class="icon"><use href="#i-crop"/></svg>Редактировать стикер</button>
-  <button id="delete-sticker" class="action-row delete-row"><svg class="icon"><use href="#i-trash"/></svg>Удалить стикер</button>
+  <div class="viewer-heading"><span id="viewer-position"></span><span id="viewer-kind" class="hidden"></span><button id="close-viewer" class="icon-button" aria-label="Закрыть просмотр">✕</button></div>
+  <div id="viewer-media" class="viewer-media" aria-live="polite"></div>
+  <p id="viewer-status" class="hint" role="status"></p>
+  <div class="viewer-navigation"><button id="previous-sticker" class="icon-button" aria-label="Предыдущий стикер">‹</button><span id="viewer-emoji"></span><button id="next-sticker" class="icon-button" aria-label="Следующий стикер">›</button></div>
+  <div class="viewer-actions"><button id="viewer-edit" class="button secondary wide"><svg class="icon"><use href="#i-crop"/></svg>Редактировать</button>
+  <button id="delete-sticker" class="action-row delete-row"><svg class="icon"><use href="#i-trash"/></svg>Удалить</button></div>
 </dialog>
 <div id="fullscreen-prompt" class="fullscreen-prompt hidden"><span>Больше места для творчества</span><button id="enter-fullscreen" class="text-button">На весь экран</button><button id="dismiss-fullscreen" class="icon-button" aria-label="Скрыть предложение">✕</button></div>
 <div id="busy" class="busy hidden" role="status" aria-live="polite"><div class="busy-card"><span class="spinner"></span><strong id="busy-text">Загрузка…</strong><p>Это может занять немного времени.</p></div></div>

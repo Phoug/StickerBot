@@ -1,3 +1,4 @@
+import aiohttp
 import asyncio
 import shutil
 import tempfile
@@ -5,7 +6,6 @@ import time
 import uuid
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Response
 from fastapi.responses import FileResponse
@@ -24,6 +24,7 @@ from backend.services.media.studio_renderer import normalize, render, probe
 from backend.services.media.photo_renderer import normalize_photo, render_photo
 from backend.services.media.preview_cache import cached_media
 from backend.storage import database, owned_pack
+from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
 
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
 _processing = asyncio.Semaphore(2)
@@ -147,23 +148,68 @@ def download_source(url, user_id):
 @router.post("/link", status_code=201)
 async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
     try:
-        url = urlparse(payload.url.strip())
-        host = (url.hostname or "").lower()
-        valid = url.scheme == "https" and not url.username and not url.password and url.port in {None, 443} and any(host == h or host.endswith("." + h) for h in SOCIAL_HOSTS)
-    except ValueError:
-        valid = False
-    if not valid:
-        raise HTTPException(422, "Вставьте HTTPS-ссылку на видео из поддерживаемой соцсети")
-    try:
+        url = validate_url(payload.url.strip())
+        host = url.hostname.lower()
+        social = any(host == h or host.endswith("." + h) for h in SOCIAL_HOSTS)
         async with user_operation(user["id"]), _processing:
             await run_in_threadpool(cleanup_expired)
+            photos = None
+            if host == "tiktok.com" or host.endswith(".tiktok.com"):
+                try:
+                    photos = await resolve_tiktok(payload.url.strip())
+                except (StickerConversionError, aiohttp.ClientError, TimeoutError, OSError):
+                    if "/photo/" in url.path:
+                        raise
+                    photos = []
+            if not social:
+                photos = [payload.url.strip()]
+            if photos:
+                results = []
+                total = 0
+                with tempfile.TemporaryDirectory(prefix="sticker_photos_") as folder:
+                    try:
+                        async with asyncio.timeout(120):
+                            stored = 0
+                            for index, photo_url in enumerate(photos):
+                                data, _ = await fetch_public(photo_url, limit=MAX_BYTES-total, image=True)
+                                total += len(data)
+                                path = Path(folder) / (str(index)+".image")
+                                path.write_bytes(data)
+                                results.append(await run_in_threadpool(prepare, path, folder, user["id"], True))
+                                stored += Path(owned_media(results[-1]["id"],user["id"])["path"]).stat().st_size
+                                if stored > MAX_BYTES:
+                                    raise StickerConversionError("Подготовленные фото занимают больше 50 МБ")
+                        return results[0] if len(results)==1 else {"kind":"album", "photos":results}
+                    except BaseException:
+                        # A failed carousel never leaves half an import behind.
+                        with database() as db:
+                            for result in results:
+                                row = db.execute("SELECT path FROM media WHERE id=? AND user_id=?", (result["id"],user["id"])).fetchone()
+                                if row: Path(row["path"]).unlink(missing_ok=True)
+                                db.execute("DELETE FROM media WHERE id=? AND user_id=?", (result["id"],user["id"]))
+                        raise
             return await run_in_threadpool(download_source, payload.url.strip(), user["id"])
-    except (StickerConversionError, DownloadFailed) as exc:
-        raise HTTPException(422, str(exc)) from exc
+    except (StickerConversionError, DownloadFailed, aiohttp.ClientError, TimeoutError, OSError) as exc:
+        message = str(exc) if isinstance(exc, (StickerConversionError, DownloadFailed)) else "Не удалось загрузить файл по ссылке. Попробуйте галерею."
+        raise HTTPException(422, message) from exc
 
 @router.get("/media/{media_id}")
-async def get_media(media_id: str, preview: bool = False, user=Depends(mini_app_user)):
+async def get_media(media_id: str, preview: bool = False, thumbnail: bool = False, user=Depends(mini_app_user)):
     media = owned_media(media_id, user["id"])
+    if thumbnail and media["kind"] == "photo":
+        async def photo_thumbnail():
+            def encode():
+                from io import BytesIO
+                from PIL import Image
+                with Image.open(media["path"]) as image:
+                    image.thumbnail((180,180))
+                    output = BytesIO()
+                    image.save(output, "WEBP", quality=75)
+                    return output.getvalue(), "image/webp"
+            async with _processing:
+                return await run_in_threadpool(encode)
+        data, mime = await cached_media((user["id"], media_id, "thumbnail"), photo_thumbnail)
+        return Response(data, media_type=mime, headers={"Cache-Control":"private, no-store"})
     if preview and media["kind"] == "render":
         async def preview_bytes():
             async with _processing:
