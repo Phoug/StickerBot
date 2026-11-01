@@ -36,8 +36,8 @@ def validate_telegram_init_data(init_data: str) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Invalid Telegram initData") from exc
 
     received_hash = data.pop("hash", None)
-    if not received_hash:
-        raise HTTPException(status_code=401, detail="Telegram initData hash is missing")
+    if not received_hash or len(received_hash) != 64 or any(c not in "0123456789abcdef" for c in received_hash):
+        raise HTTPException(status_code=401, detail="Invalid or missing Telegram initData hash")
 
     data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(data.items()))
     secret_key = hmac.new(
@@ -78,7 +78,7 @@ def validate_telegram_init_data(init_data: str) -> dict[str, Any]:
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=401, detail="Invalid Telegram user data") from exc
 
-    if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+    if not isinstance(user, dict) or (type(user.get("id")) is not int or user["id"] <= 0):
         raise HTTPException(status_code=401, detail="Invalid Telegram user ID")
 
     return {"user": user, "auth_date": auth_date}

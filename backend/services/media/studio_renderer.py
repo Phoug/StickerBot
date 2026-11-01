@@ -25,7 +25,7 @@ def normalize(source, output):
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-i", str(source), "-map", "0:v:0", "-an",
-             "-vf", "scale=1280:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
+             "-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",
              "-movflags", "+faststart", "-fs", "52428801", str(output)],
             capture_output=True, check=True, timeout=180)
@@ -35,18 +35,28 @@ def normalize(source, output):
         raise StickerConversionError("Подготовленное видео превышает 50 МБ")
     return probe(output)[0]
 
+def canvas_size(width, height, shape):
+    if shape == "original":
+        factor = 512 / max(width, height)
+        return max(2, round(width * factor / 2) * 2), max(2, round(height * factor / 2) * 2)
+    return 512, 512
+
+
 def render(source, output, start, end, shape, zoom, x, y):
     duration, width, height = probe(source)
-    if not 0 <= start < end <= duration + 0.01 or end - start > 3.001:
+    if not 0 <= start < end <= duration + 0.01 or not 0.05 <= end - start <= 3.001:
         raise StickerConversionError("Выберите фрагмент продолжительностью до 3 секунд")
-    factor = max(512 / width, 512 / height) * zoom
+    out_w, out_h = canvas_size(width, height, shape)
+    factor = max(out_w / width, out_h / height) * zoom
     scaled_w = math.ceil(width * factor / 2) * 2
     scaled_h = math.ceil(height * factor / 2) * 2
-    left = round((scaled_w - 512) * x / 2) * 2
-    top = round((scaled_h - 512) * y / 2) * 2
-    filters = f"scale={scaled_w}:{scaled_h},crop=512:512:{left}:{top},setsar=1,format=yuva420p"
+    left = round((scaled_w - out_w) * x / 2) * 2
+    top = round((scaled_h - out_h) * y / 2) * 2
+    filters = f"scale={scaled_w}:{scaled_h},crop={out_w}:{out_h}:{left}:{top},setsar=1,format=yuva420p"
     if shape in {"circle", "rounded"}:
         distance = "(X-255.5)*(X-255.5)+(Y-255.5)*(Y-255.5)" if shape == "circle" else "pow(max(abs(X-255.5)-207.5,0),2)+pow(max(abs(Y-255.5)-207.5,0),2)"
         radius = 256 if shape == "circle" else 48
-        filters += f",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte({distance},{radius * radius}),255,0)'"
-    _convert_with_quality_search(str(source), str(output), start, end - start, filters)
+        filters += f",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte({distance},{radius * radius}),alpha(X,Y),0)'"
+    # Telegram video stickers are VP9; the native decoder drops their alpha.
+    decoder = "libvpx-vp9" if Path(source).name.endswith(".original.webm") else None
+    _convert_with_quality_search(str(source), str(output), start, end - start, filters, decoder)

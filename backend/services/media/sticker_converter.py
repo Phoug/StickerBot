@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 import tempfile
@@ -53,6 +54,7 @@ def _encode(
     crf: int,
     bitrate_kbit: int | None = None,
     custom_filter: str | None = None,
+    decoder: str | None = None,
 ) -> None:
     filter_chain = (
         "scale=512:512:force_original_aspect_ratio=decrease:force_divisible_by=2,"
@@ -62,6 +64,7 @@ def _encode(
         filter_chain = f"{custom_filter},fps={fps},format=yuva420p"
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}",
+        *(["-c:v", decoder] if decoder else []),
         "-i", input_path, "-t", f"{duration:.3f}", "-vf", filter_chain, "-an",
         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0",
     ]
@@ -86,6 +89,7 @@ def _convert_with_quality_search(
     start: float,
     duration: float,
     custom_filter: str | None = None,
+    decoder: str | None = None,
 ) -> None:
     target_bitrate_kbit = int((MAX_OUTPUT_SIZE * 8) / (duration * 1000) * 0.85)
     attempts = [(32, 30, None), (40, 30, None), (48, 25, None), (52, 20, target_bitrate_kbit)]
@@ -93,7 +97,7 @@ def _convert_with_quality_search(
     for index, (crf, fps, bitrate) in enumerate(attempts):
         attempt_path = f"{output_path}.attempt{index}.webm"
         try:
-            _encode(input_path, attempt_path, start, duration, fps, crf, bitrate, custom_filter)
+            _encode(input_path, attempt_path, start, duration, fps, crf, bitrate, custom_filter, decoder)
             last_size = os.path.getsize(attempt_path)
             if last_size <= MAX_OUTPUT_SIZE:
                 os.replace(attempt_path, output_path)
@@ -116,15 +120,17 @@ def convert_video_to_sticker(
     input_file = Path(input_path)
     if not input_file.is_file():
         raise StickerConversionError("Input video does not exist")
-    if start < 0:
+    if not math.isfinite(start) or start < 0:
         raise StickerConversionError("Start time cannot be negative")
     source_duration = _probe_duration(str(input_file))
     if start >= source_duration:
         raise StickerConversionError("Start time is outside the source video")
     if end is None:
         end = min(source_duration, start + MAX_DURATION)
-    if end <= start:
+    if not math.isfinite(end) or end <= start:
         raise StickerConversionError("End time must be greater than start time")
+    if end > source_duration + 0.01:
+        raise StickerConversionError("End time is outside the source video")
     duration = end - start
     if duration > MAX_DURATION:
         raise StickerConversionError("Sticker duration cannot exceed 3 seconds")

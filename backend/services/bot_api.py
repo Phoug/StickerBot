@@ -19,10 +19,11 @@ class TelegramAPI:
     async def upload(self, user_id, path):
         form = aiohttp.FormData()
         form.add_field("user_id", str(user_id))
-        form.add_field("sticker_format", "video")
+        photo = path.suffix.lower() == ".webp"
+        form.add_field("sticker_format", "static" if photo else "video")
         try:
             with path.open("rb") as file:
-                form.add_field("sticker", file, filename="sticker.webm", content_type="video/webm")
+                form.add_field("sticker", file, filename=path.name, content_type="image/webp" if photo else "video/webm")
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as session:
                     async with session.post(f"https://api.telegram.org/bot{BOT_TOKEN}/uploadStickerFile", data=form) as response:
                         result = await response.json()
