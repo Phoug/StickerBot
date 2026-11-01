@@ -1,4 +1,4 @@
-# Sticker Studio / StickerBot
+# StickerBot
 
 Telegram Mini App для создания стикерпаков, фото- и видеостикеров. Вход — через проверенные Telegram Mini App initData. Телефон, коды входа, Telethon и пользовательские сессии не используются.
 
