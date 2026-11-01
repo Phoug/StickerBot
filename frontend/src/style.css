@@ -1883,16 +1883,23 @@ body.viewing .fullscreen-prompt {
   padding: 0;
 }
 #stickers .row-emoji input {
-  width: 100%;
-  max-width: 100px;
-  height: 40px;
-  min-height: 40px;
+  width: 48px;
+  max-width: 100%;
+  height: 48px;
+  min-height: 48px;
   margin: 0;
-  padding: 4px 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
-  font-size: 22px;
-  line-height: 30px;
+  font-size: 24px;
+  line-height: 1.2;
   border-radius: 10px;
+  transition: background .15s ease;
+}
+#stickers .row-emoji input:focus {
+  background: #ffffff0a;
 }
 .order-actions {
   padding-top: 8px;
