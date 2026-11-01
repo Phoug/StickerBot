@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM dhi.io/python:3.14-debian13-dev AS builder
+ARG PYTHON_IMAGE=dhi.io/python:3.14-debian13-dev
+FROM ${PYTHON_IMAGE} AS builder
 WORKDIR /app
 RUN python3 -m venv /venv
 ENV PATH="/venv/bin:$PATH"
@@ -8,7 +9,7 @@ COPY backend/requirements.txt /tmp/backend-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r /tmp/bot-requirements.txt -r /tmp/backend-requirements.txt
 
-FROM dhi.io/python:3.14-debian13-dev AS runtime
+FROM ${PYTHON_IMAGE} AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
