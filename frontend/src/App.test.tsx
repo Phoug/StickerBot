@@ -281,3 +281,35 @@ it("cropping preserves artwork proportions at every canvas shape and zoom", () =
         expect(overflow.y).toBeGreaterThanOrEqual(0);
       }
 });
+
+it("keeps Telegram swipe protection during ordering and nested viewing", async () => {
+  const sdk = tg!;
+  sdk.disableVerticalSwipes = vi.fn();
+  sdk.enableVerticalSwipes = vi.fn();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Редактировать" }));
+  expect(sdk.disableVerticalSwipes).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByLabelText("Посмотреть стикер 1"));
+  fireEvent.click(screen.getByLabelText("Закрыть просмотр"));
+  expect(sdk.enableVerticalSwipes).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+  expect(sdk.enableVerticalSwipes).toHaveBeenCalledOnce();
+});
+
+it("shows play/pause feedback only after a tap and hides it afterwards", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(await screen.findByLabelText("Посмотреть стикер 2"));
+  const toggle = await screen.findByRole("button", { name: "Пауза" });
+  expect(document.querySelector(".playback-flash")).toBeNull();
+  const video = document.querySelector("dialog video") as HTMLVideoElement;
+  video.play = vi.fn().mockResolvedValue(undefined);
+  video.pause = vi.fn();
+  fireEvent.click(toggle);
+  expect(document.querySelector(".playback-flash")).not.toBeNull();
+  await waitFor(
+    () => expect(document.querySelector(".playback-flash")).toBeNull(),
+    { timeout: 1500 },
+  );
+});

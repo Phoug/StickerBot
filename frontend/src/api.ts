@@ -44,18 +44,23 @@ interface Cached {
   promise: Promise<string>;
 }
 const cache = new Map<string, Cached>();
-let activeDownloads = 0;
-const downloadQueue: Array<() => void> = [];
+const lanes = {
+  foreground: { active: 0, waiting: [] as Array<() => void> },
+  background: { active: 0, waiting: [] as Array<() => void> },
+};
 async function download(path: string) {
-  if (activeDownloads >= 4)
-    await new Promise<void>((resolve) => downloadQueue.push(resolve));
-  else activeDownloads++;
+  const lane = /thumbnail|\/cover/.test(path)
+    ? lanes.background
+    : lanes.foreground;
+  if (lane.active >= 2)
+    await new Promise<void>((resolve) => lane.waiting.push(resolve));
+  else lane.active++;
   try {
     return await (await request(path)).blob();
   } finally {
-    const next = downloadQueue.shift();
+    const next = lane.waiting.shift();
     if (next) next();
-    else activeDownloads--;
+    else lane.active--;
   }
 }
 export async function mediaURL(path: string) {

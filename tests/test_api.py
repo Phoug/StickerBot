@@ -104,6 +104,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(studio, "DATA_DIR", tmp_path)
     from backend.services.media.preview_cache import _items
     _items.clear()
+    studio._link_sources.clear()
+    studio._edit_sources.clear()
     fake = FakeTelegram()
     monkeypatch.setattr(stickers, "telegram", fake)
     monkeypatch.setattr(studio, "telegram", fake)
@@ -453,3 +455,45 @@ def test_video_edit_retains_private_original_until_expiry(client, monkeypatch):
         db.execute("UPDATE media SET created_at=0 WHERE id=?",(media["id"],))
     studio.cleanup_expired()
     assert not original.exists() and not Path(media["path"]).exists()
+
+
+def test_viewer_and_editor_share_preview_and_reopening_editor_reuses_source(client, monkeypatch):
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    fake.sets[pack['name']]['stickers'][1]['is_video'] = True
+    calls = []
+    def preview(data):
+        calls.append(1)
+        temp = folder/'shared-preview';temp.mkdir()
+        output = temp/'preview.mp4';output.write_bytes(b'mp4-preview')
+        return output
+    monkeypatch.setattr(stickers,'make_video_preview',preview)
+    def forbidden(data):
+        raise AssertionError('Editor must reuse the viewer MP4')
+    monkeypatch.setattr(studio,'make_video_preview',forbidden)
+    monkeypatch.setattr(studio,'probe',lambda path: (1,512,288))
+    root=f'/api/packs/{pack["id"]}/stickers/id-1'
+    assert api.get(root+'/file',headers=auth()).content==b'mp4-preview'
+    route=f'/api/studio/packs/{pack["id"]}/stickers/id-1/edit'
+    first=api.post(route,headers=auth());assert first.status_code==201
+    second=api.post(route,headers=auth());assert second.json()['id']==first.json()['id']
+    assert len(calls)==1
+    assert api.post(route,headers=auth(8)).status_code==404
+
+
+def test_repeat_video_link_reuses_owned_source_and_skips_tiktok_photo_probe(client, monkeypatch):
+    api,_,folder=client
+    calls=[]
+    def download(url,user_id):
+        calls.append(user_id)
+        path=folder/(str(user_id)+".mp4");path.write_bytes(b"fixture")
+        return {**studio.register(path,user_id,"source",3),"kind":"video"}
+    async def forbidden(url):raise AssertionError("A video URL must not probe photo HTML")
+    monkeypatch.setattr(studio,"resolve_tiktok",forbidden)
+    monkeypatch.setattr(studio,"download_source",download)
+    payload={"url":"https://www.tiktok.com/@test/video/123"}
+    first=api.post('/api/studio/link',json=payload,headers=auth()).json()
+    second=api.post('/api/studio/link',json=payload,headers=auth()).json()
+    assert first['id']==second['id'] and calls==[7]
+    other=api.post('/api/studio/link',json=payload,headers=auth(8)).json()
+    assert other['id']!=first['id'] and calls==[7,8]

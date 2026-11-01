@@ -74,6 +74,13 @@ class RendererTests(unittest.TestCase):
             self.assertLessEqual(rgba[(30 * 512 + 30) * 4 + 3], 3)
             self.assertEqual(rgba[(256 * 512 + 256) * 4 + 3], 255)
 
+    def test_compatible_h264_editor_source_is_remuxed_without_reencoding(self):
+        output = Path(self.folder.name)/"fast-normalized.mp4"
+        normalize(self.source,output)
+        def video_hash(path):
+            return subprocess.run(["ffmpeg","-v","error","-i",str(path),"-map","0:v:0","-c:v","copy","-f","hash","-hash","sha256","-"],capture_output=True,check=True).stdout
+        self.assertEqual(video_hash(self.source),video_hash(output))
+
     def test_invalid_ranges_are_rejected(self):
         for start, end in ((0, 4), (3, 2), (-1, 1), (3.5, 5), (0, .01)):
             with self.subTest(start=start, end=end):

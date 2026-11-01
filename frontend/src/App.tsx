@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Playback } from "./Playback";
+import { useSwipeLock } from "./useSwipeLock";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   json,
   request,
@@ -13,76 +21,6 @@ import { Editor } from "./Editor";
 import icons from "./icons.svg?raw";
 type Screen =
   "home" | "new" | "pack" | "source" | "album" | "editor" | "preview";
-function Playback({
-  path,
-  video,
-  alt,
-}: {
-  path: string;
-  video: boolean;
-  alt: string;
-}) {
-  const [url, setURL] = useState(""),
-    [failure, setFailure] = useState(""),
-    [paused, setPaused] = useState(false);
-  const ref = useRef<HTMLVideoElement>(null);
-  useEffect(() => {
-    let live = true;
-    setURL("");
-    setFailure("");
-    void mediaURL(path).then(
-      (u) => {
-        if (live) setURL(u);
-      },
-      (e) => {
-        if (live) setFailure(e.message);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [path]);
-  return (
-    <>
-      {failure && <p role="status">{failure}</p>}
-      {url && video && (
-        <button
-          className="icon-button preview-toggle"
-          aria-label={paused ? "Воспроизвести" : "Пауза"}
-          onClick={() => {
-            const v = ref.current!;
-            if (v.paused) void v.play().catch(() => {});
-            else v.pause();
-          }}
-        >
-          <Icon name={paused ? "play" : "pause"} />
-        </button>
-      )}
-      {url &&
-        (video ? (
-          <video
-            ref={ref}
-            src={url}
-            autoPlay
-            muted
-            loop
-            playsInline
-            disablePictureInPicture
-            onPlay={() => setPaused(false)}
-            onPause={() => setPaused(true)}
-            onClick={() => {
-              const v = ref.current!;
-              if (v.paused) void v.play().catch(() => {});
-              else v.pause();
-            }}
-            onError={() => setFailure("Не удалось воспроизвести видео.")}
-          />
-        ) : (
-          <img src={url} alt={alt} />
-        ))}
-    </>
-  );
-}
 export default function App() {
   const [screen, setScreen] = useState<Screen>("home"),
     [packs, setPacks] = useState<Pack[]>([]),
@@ -106,10 +44,44 @@ export default function App() {
     );
   const lock = useRef(false),
     renderCache = useRef<{ key: string; media: Media } | null>(null),
-    drag = useRef<{ id: string; pointer: number; y: number } | null>(null),
+    drag = useRef<{
+      id: string;
+      pointer: number;
+      y: number;
+      grab: number;
+    } | null>(null),
     list = useRef<HTMLDivElement>(null),
     orderRef = useRef(order);
   orderRef.current = order;
+  useSwipeLock(order !== null || viewer !== null);
+  const rowPositions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    if (!order) {
+      rowPositions.current.clear();
+      return;
+    }
+    const rows = [...(list.current?.children || [])] as HTMLElement[];
+    for (const row of rows) {
+      const id = row.dataset.stickerId!,
+        before = rowPositions.current.get(id),
+        delta = before === undefined ? 0 : before - row.offsetTop;
+      if (
+        delta &&
+        drag.current?.id !== id &&
+        !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      ) {
+        row.getAnimations?.().forEach((a) => a.cancel());
+        row.animate?.(
+          [
+            { transform: `translateY(${delta}px)` },
+            { transform: "translateY(0)" },
+          ],
+          { duration: 200, easing: "cubic-bezier(.2,.8,.2,1)" },
+        );
+      }
+      rowPositions.current.set(id, row.offsetTop);
+    }
+  }, [order]);
   const task = async (label: string, fn: () => Promise<void>) => {
     if (lock.current) return;
     lock.current = true;
@@ -255,6 +227,11 @@ export default function App() {
         current = orderRef.current;
       if (!d || !current || !list.current) return;
       d.y = y;
+      const floating = list.current.querySelector<HTMLElement>(
+        `[data-sticker-id="${d.id}"]`,
+      );
+      if (floating)
+        floating.style.transform = `translateY(${y - d.grab - list.current.getBoundingClientRect().top - floating.offsetTop}px)`;
       const rows = [...list.current.children] as HTMLElement[],
         from = current.indexOf(d.id);
       let to = from;
@@ -277,7 +254,26 @@ export default function App() {
       e.preventDefault();
       move(e.clientY);
     };
-    const end = () => {
+    const end = (event?: PointerEvent | Event) => {
+      if (
+        event &&
+        "pointerId" in event &&
+        event.pointerId !== drag.current?.pointer
+      )
+        return;
+      const row = list.current?.querySelector<HTMLElement>(".is-dragging");
+      if (row) {
+        const transform = row.style.transform;
+        row.style.transform = "";
+        if (
+          transform &&
+          !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        )
+          row.animate?.([{ transform }, { transform: "translateY(0)" }], {
+            duration: 160,
+            easing: "ease-out",
+          });
+      }
       drag.current = null;
       setDragging("");
       cancelAnimationFrame(frame);
@@ -348,6 +344,15 @@ export default function App() {
       document.removeEventListener("pointerdown", pointer);
     };
   }, []);
+  const swipe = useRef({ x: 0, y: 0, moved: false });
+  const [viewerDirection, setViewerDirection] = useState(1);
+  const navigateViewer = (index: number) => {
+    if (!pack || viewer === null) return;
+    const next = Math.max(0, Math.min(pack.stickers.length - 1, index));
+    if (next === viewer) return;
+    setViewerDirection(next > viewer ? 1 : -1);
+    setViewer(next);
+  };
   const active = pack && viewer !== null ? pack.stickers[viewer] : null;
   const workspace = screen === "editor" || screen === "preview";
   return (
@@ -633,11 +638,19 @@ export default function App() {
                         className="drag-handle"
                         aria-label={"Перетащить стикер " + (index + 1)}
                         onPointerDown={(e) => {
+                          if (e.button !== 0 || drag.current || lock.current)
+                            return;
                           e.preventDefault();
+                          e.currentTarget.setPointerCapture(e.pointerId);
                           drag.current = {
                             id,
                             pointer: e.pointerId,
                             y: e.clientY,
+                            grab:
+                              e.clientY -
+                              e.currentTarget
+                                .closest<HTMLElement>(".sticker-row")!
+                                .getBoundingClientRect().top,
                           };
                           setDragging(id);
                         }}
@@ -693,7 +706,9 @@ export default function App() {
                       </>
                     ) : s.is_video || s.is_animated ? (
                       <span className="sticker-kind" aria-hidden="true">
-                        ▶
+                        <svg viewBox="0 0 16 16">
+                          <path d="M6 4 12 8 6 12Z" />
+                        </svg>
                       </span>
                     ) : null}
                   </div>
@@ -902,6 +917,7 @@ export default function App() {
         <Modal
           label="Просмотр стикера"
           className="sticker-viewer"
+          onNavigate={(delta) => navigateViewer(viewer + delta)}
           onClose={() => setViewer(null)}
         >
           <div className="viewer-heading">
@@ -919,23 +935,32 @@ export default function App() {
           </div>
           <div
             className="viewer-media"
+            key={active.id}
+            style={
+              { "--slide-direction": viewerDirection } as React.CSSProperties
+            }
             onPointerDown={(e) => {
-              e.currentTarget.dataset.x = String(e.clientX);
-              e.currentTarget.dataset.y = String(e.clientY);
+              swipe.current = { x: e.clientX, y: e.clientY, moved: false };
+            }}
+            onPointerMove={(e) => {
+              if (Math.abs(e.clientX - swipe.current.x) > 16)
+                swipe.current.moved = true;
             }}
             onPointerUp={(e) => {
-              const dx = e.clientX - Number(e.currentTarget.dataset.x),
-                dy = e.clientY - Number(e.currentTarget.dataset.y);
+              const dx = e.clientX - swipe.current.x,
+                dy = e.clientY - swipe.current.y;
               if (Math.abs(dx) > 50 && Math.abs(dy) < 60)
-                setViewer(
-                  Math.max(
-                    0,
-                    Math.min(
-                      pack.stickers.length - 1,
-                      viewer + (dx < 0 ? 1 : -1),
-                    ),
-                  ),
-                );
+                navigateViewer(viewer + (dx < 0 ? 1 : -1));
+            }}
+            onPointerCancel={() => {
+              swipe.current.moved = true;
+            }}
+            onClickCapture={(e) => {
+              if (swipe.current.moved) {
+                e.preventDefault();
+                e.stopPropagation();
+                swipe.current.moved = false;
+              }
             }}
           >
             <Playback
@@ -948,6 +973,24 @@ export default function App() {
               }
               video={!!active.is_video}
               alt={active.emoji}
+              onReady={() => {
+                const neighbor =
+                  pack.stickers[viewer + 1] || pack.stickers[viewer - 1];
+                if (neighbor)
+                  void mediaURL(
+                    "/api/packs/" +
+                      pack.id +
+                      "/stickers/" +
+                      encodeURIComponent(neighbor.id) +
+                      "/file",
+                  ).catch(() => {});
+              }}
+              poster={
+                "/api/packs/" +
+                pack.id +
+                "/thumbnail/" +
+                encodeURIComponent(active.preview_id)
+              }
             />
           </div>
           {active.is_animated && (
@@ -955,25 +998,38 @@ export default function App() {
               Показана обложка. Анимация доступна в Telegram.
             </p>
           )}
-          <div className="viewer-navigation">
-            <button
-              className="icon-button"
-              aria-label="Предыдущий стикер"
-              disabled={viewer === 0}
-              onClick={() => setViewer(viewer - 1)}
-            >
-              ‹
-            </button>
+          <div className="viewer-caption">
             <span id="viewer-emoji">{active.emoji}</span>
-            <button
-              className="icon-button"
-              aria-label="Следующий стикер"
-              disabled={viewer === pack.stickers.length - 1}
-              onClick={() => setViewer(viewer + 1)}
-            >
-              ›
-            </button>
+            <span>Листайте смахиванием</span>
           </div>
+          <nav className="viewer-strip" aria-label="Стикеры набора">
+            {pack.stickers
+              .slice(
+                Math.max(0, Math.min(viewer - 2, pack.stickers.length - 5)),
+                Math.max(0, Math.min(viewer - 2, pack.stickers.length - 5)) + 5,
+              )
+              .map((sticker) => {
+                const index = pack.stickers.indexOf(sticker);
+                return (
+                  <button
+                    key={sticker.id}
+                    aria-label={"Стикер " + (index + 1)}
+                    aria-current={index === viewer ? "true" : undefined}
+                    onClick={() => navigateViewer(index)}
+                  >
+                    <ImageAsset
+                      path={
+                        "/api/packs/" +
+                        pack.id +
+                        "/thumbnail/" +
+                        encodeURIComponent(sticker.preview_id)
+                      }
+                      alt=""
+                    />
+                  </button>
+                );
+              })}
+          </nav>
           <div className="viewer-actions">
             <button
               id="viewer-edit"

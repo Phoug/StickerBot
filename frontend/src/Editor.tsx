@@ -1,6 +1,7 @@
+import { useSwipeLock } from "./useSwipeLock";
 import { useEffect, useRef, useState, type PointerEvent as PE } from "react";
 import type { Edit, Media } from "./types";
-import { mediaURL, tg } from "./api";
+import { mediaURL } from "./api";
 import { Icon } from "./ui";
 export const clamp = (n: number, min = 0, max = 1) =>
   Math.max(min, Math.min(max, n));
@@ -89,17 +90,7 @@ export function Editor({
       live = false;
     };
   }, [source.id]);
-  useEffect(() => {
-    if (tg?.isVersionAtLeast && !tg.isVersionAtLeast("7.7")) return;
-    try {
-      tg?.disableVerticalSwipes?.();
-    } catch {}
-    return () => {
-      try {
-        tg?.enableVerticalSwipes?.();
-      } catch {}
-    };
-  }, []);
+  useSwipeLock(true);
   useEffect(() => {
     if (photo || !url) return;
     let live = true;

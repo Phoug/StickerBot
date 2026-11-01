@@ -28,6 +28,14 @@ from backend.services.media.photo_links import validate_url, resolve_tiktok, fet
 
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
 _processing = asyncio.Semaphore(2)
+_edit_sources = {}
+_link_sources = {}
+
+def remember_link(key, result):
+    if len(_link_sources)>=64: _link_sources.pop(next(iter(_link_sources)))
+    _link_sources[key] = (time.monotonic()+300,result)
+    return result
+
 SOCIAL_HOSTS = {"youtube.com", "youtu.be", "instagram.com", "tiktok.com", "vk.com", "vkvideo.ru", "twitter.com", "x.com", "reddit.com", "v.redd.it", "facebook.com", "fb.watch", "vimeo.com", "rutube.ru", "ok.ru"}
 
 class SourceURL(BaseModel):
@@ -153,8 +161,17 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
         social = any(host == h or host.endswith("." + h) for h in SOCIAL_HOSTS)
         async with user_operation(user["id"]), _processing:
             await run_in_threadpool(cleanup_expired)
+            key = (user["id"],payload.url.strip())
+            previous = _link_sources.get(key)
+            if previous and previous[0]>time.monotonic():
+                result = previous[1]
+                try:
+                    for media in result.get("photos",[result]): owned_media(media["id"],user["id"])
+                    return result
+                except HTTPException:
+                    _link_sources.pop(key,None)
             photos = None
-            if host == "tiktok.com" or host.endswith(".tiktok.com"):
+            if (host == "tiktok.com" or host.endswith(".tiktok.com")) and "/video/" not in url.path:
                 try:
                     photos = await resolve_tiktok(payload.url.strip())
                 except (StickerConversionError, aiohttp.ClientError, TimeoutError, OSError):
@@ -179,7 +196,7 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
                                 stored += Path(owned_media(results[-1]["id"],user["id"])["path"]).stat().st_size
                                 if stored > MAX_BYTES:
                                     raise StickerConversionError("Подготовленные фото занимают больше 50 МБ")
-                        return results[0] if len(results)==1 else {"kind":"album", "photos":results}
+                        return remember_link(key, results[0] if len(results)==1 else {"kind":"album", "photos":results})
                     except BaseException:
                         # A failed carousel never leaves half an import behind.
                         with database() as db:
@@ -188,7 +205,7 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
                                 if row: Path(row["path"]).unlink(missing_ok=True)
                                 db.execute("DELETE FROM media WHERE id=? AND user_id=?", (result["id"],user["id"]))
                         raise
-            return await run_in_threadpool(download_source, payload.url.strip(), user["id"])
+            return remember_link(key, await run_in_threadpool(download_source, payload.url.strip(), user["id"]))
     except (StickerConversionError, DownloadFailed, aiohttp.ClientError, TimeoutError, OSError) as exc:
         message = str(exc) if isinstance(exc, (StickerConversionError, DownloadFailed)) else "Не удалось загрузить файл по ссылке. Попробуйте галерею."
         raise HTTPException(422, message) from exc
@@ -298,23 +315,43 @@ async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_use
         sticker = find_sticker(actual, sticker_id)
         if sticker.get("is_animated"):
             raise HTTPException(422, "Редактор поддерживает фото и видео. TGS-анимацию можно посмотреть в Telegram.")
+        cache_key = (user["id"],pack_id,sticker_id,sticker["file_id"])
+        previous = _edit_sources.get(cache_key)
+        if previous:
+            try:
+                owned_media(previous["id"],user["id"])
+                return previous
+            except HTTPException:
+                _edit_sources.pop(cache_key,None)
         data, _ = await cached_media((user["id"], sticker["file_id"]), lambda: telegram.file(sticker["file_id"]))
         with tempfile.TemporaryDirectory(prefix="sticker_edit_") as folder:
             source = Path(folder) / "original"
             source.write_bytes(data)
             try:
                 if not sticker.get("is_video"):
-                    return await run_in_threadpool(prepare, source, folder, user["id"], True)
+                    result = await run_in_threadpool(prepare, source, folder, user["id"], True)
+                    if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
+                    _edit_sources[cache_key] = result
+                    return result
                 # Use a composited H.264 copy in the browser and retain the
                 # original VP9 with alpha for rendering. Both expire together.
-                preview = await run_in_threadpool(make_video_preview, data)
-                try:
-                    duration = (await run_in_threadpool(probe, preview))[0]
-                    result = register(preview, user["id"], "source", duration)
-                finally:
-                    cleanup_files(preview.parent)
+                async def preview_bytes():
+                    preview = await run_in_threadpool(make_video_preview, data)
+                    try:
+                        return preview.read_bytes(), "video/mp4"
+                    finally:
+                        cleanup_files(preview.parent)
+                # Share the immutable MP4 already used by the sticker viewer.
+                preview_data, _ = await cached_media((user["id"],sticker["file_id"],"mp4"),preview_bytes)
+                preview = Path(folder)/"preview.mp4"
+                preview.write_bytes(preview_data)
+                duration = (await run_in_threadpool(probe, preview))[0]
+                result = register(preview,user["id"],"source",duration)
                 registered = owned_media(result["id"], user["id"])
                 shutil.copyfile(source, Path(registered["path"]).with_suffix(".original.webm"))
-                return {**result, "kind": "video"}
+                result = {**result, "kind": "video"}
+                if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
+                _edit_sources[cache_key] = result
+                return result
             except StickerConversionError as exc:
                 raise HTTPException(422, str(exc)) from exc

@@ -17,7 +17,24 @@ export function ImageAsset({
   className?: string;
 }) {
   const [url, setURL] = useState("");
+  const host = useRef<HTMLSpanElement>(null);
+  const [visible, setVisible] = useState(!globalThis.IntersectionObserver);
   useEffect(() => {
+    if (!globalThis.IntersectionObserver) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "160px" },
+    );
+    if (host.current) observer.observe(host.current);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!visible) return;
     let live = true;
     setURL("");
     void mediaURL(path).then(
@@ -29,12 +46,16 @@ export function ImageAsset({
     return () => {
       live = false;
     };
-  }, [path]);
-  return url ? (
-    <img className={className} src={url} alt={alt} />
-  ) : (
-    <span aria-label={alt}>
-      <Icon name="sticker" />
+  }, [path, visible]);
+  return (
+    <span ref={host} className="asset-image">
+      {url ? (
+        <img className={className} src={url} alt={alt} />
+      ) : (
+        <span aria-label={alt}>
+          <Icon name="sticker" />
+        </span>
+      )}
     </span>
   );
 }
@@ -43,11 +64,13 @@ export function Modal({
   onClose,
   label,
   className = "",
+  onNavigate,
 }: {
   children: ReactNode;
   onClose: () => void;
   label: string;
   className?: string;
+  onNavigate?: (delta: number) => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -63,6 +86,10 @@ export function Modal({
       className={className}
       aria-label={label}
       onKeyDown={(e) => {
+        if (onNavigate && ["ArrowLeft", "ArrowRight"].includes(e.key)) {
+          e.preventDefault();
+          onNavigate(e.key === "ArrowLeft" ? -1 : 1);
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           onClose();

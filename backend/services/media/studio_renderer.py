@@ -4,11 +4,11 @@ import subprocess
 from pathlib import Path
 from backend.services.media.sticker_converter import StickerConversionError, _convert_with_quality_search
 
-def probe(path):
+def probe(path, details=False):
     try:
         result = subprocess.run(
             ["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-select_streams", "v:0", "-show_entries",
-             "stream=width,height:format=duration", "-of", "json", str(path)],
+             "stream=width,height,codec_name,pix_fmt,sample_aspect_ratio:stream_side_data=rotation:format=duration", "-of", "json", str(path)],
             capture_output=True, check=True, timeout=20)
         info = json.loads(result.stdout)
         stream = info["streams"][0]
@@ -16,12 +16,26 @@ def probe(path):
         width, height = int(stream["width"]), int(stream["height"])
         if not math.isfinite(duration) or not 0.05 <= duration <= 600 or not 1 <= width <= 4096 or not 1 <= height <= 4096:
             raise ValueError()
-        return duration, width, height
+        return (duration, width, height, stream) if details else (duration, width, height)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError) as exc:
         raise StickerConversionError("Нужно видео до 10 минут с разрешением не более 4096×4096") from exc
 
 def normalize(source, output):
-    probe(source)
+    _, width, height, stream = probe(source, details=True)
+    compatible = (stream.get("codec_name")=="h264" and stream.get("pix_fmt")=="yuv420p"
+                  and stream.get("sample_aspect_ratio","1:1") in {"1:1","N/A"}
+                  and max(width,height)<=1280 and width%2==0 and height%2==0
+                  and not any(item.get("rotation",0) for item in stream.get("side_data_list",[])))
+    if compatible:
+        try:
+            subprocess.run(["ffmpeg","-y","-v","error","-protocol_whitelist","file,pipe",
+                            "-format_whitelist","mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv",
+                            "-i",str(source),"-map","0:v:0","-an","-c:v","copy","-movflags","+faststart",str(output)],
+                           capture_output=True,check=True,timeout=60)
+            if output.stat().st_size <= 50*1024*1024:
+                return probe(output)[0]
+        except (OSError, subprocess.SubprocessError):
+            pass
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-i", str(source), "-map", "0:v:0", "-an",
