@@ -1,18 +1,38 @@
+x-logging: &logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   api:
     image: yavika/sticker-bot:${IMAGE_TAG:?IMAGE_TAG is required}
     command: ["python3", "-m", "uvicorn", "backend.main:app", "--host=0.0.0.0", "--port=8000", "--proxy-headers", "--forwarded-allow-ips=*"]
     restart: unless-stopped
+    init: true
+    stop_grace_period: 5m
+    cpus: ${API_CPU_LIMIT:-2.0}
+    mem_limit: ${API_MEMORY_LIMIT:-2g}
+    pids_limit: 256
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m,mode=1777
+    logging: *logging
     ports:
       - "127.0.0.1:8000:8000"
     env_file:
       - .env
     environment:
       DATA_DIR: /app/data
+      MEDIA_CONCURRENCY: ${MEDIA_CONCURRENCY:-2}
+      MEDIA_JOB_TIMEOUT_SECONDS: ${MEDIA_JOB_TIMEOUT_SECONDS:-240}
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-2}
     volumes:
       - sticker-data:/app/data
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"]
       interval: 15s
       timeout: 6s
       retries: 4
@@ -22,13 +42,63 @@ services:
     image: yavika/sticker-bot:${IMAGE_TAG:?IMAGE_TAG is required}
     command: ["python3", "run_bot.py"]
     restart: unless-stopped
+    init: true
+    stop_grace_period: 5m
+    cpus: ${BOT_CPU_LIMIT:-0.5}
+    mem_limit: ${BOT_MEMORY_LIMIT:-384m}
+    pids_limit: 128
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    logging: *logging
     env_file:
       - .env
     environment:
       VIDEO_API_URL: http://api:8000
+    healthcheck:
+      test: ["CMD", "python3", "-m", "app.bot.health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      api:
+        condition: service_healthy
+
+  backup:
+    image: yavika/sticker-bot:${IMAGE_TAG:?IMAGE_TAG is required}
+    command: ["python3", "-m", "backend.backup", "daemon"]
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 1m
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 0.25
+    mem_limit: 128m
+    pids_limit: 32
+    environment:
+      DATA_DIR: /app/data
+      BACKUP_DIR: /app/backups
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-3600}
+      BACKUP_RETENTION_COUNT: ${BACKUP_RETENTION_COUNT:-48}
+    volumes:
+      - sticker-data:/app/data
+      - sticker-backups:/app/backups
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "python3", "-m", "backend.backup", "health"]
+      interval: 5m
+      timeout: 5s
+      start_period: 30s
+      retries: 2
     depends_on:
       api:
         condition: service_healthy
 
 volumes:
   sticker-data:
+  sticker-backups:
