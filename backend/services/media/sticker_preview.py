@@ -2,6 +2,7 @@
 import subprocess
 import tempfile
 from pathlib import Path
+from backend.services.media.commands import run_command
 
 from backend.services.file_service import cleanup_files
 from backend.services.media.sticker_converter import StickerConversionError
@@ -12,7 +13,7 @@ def make_video_preview(data: bytes) -> Path:
     try:
         source, output = folder / "input.webm", folder / "preview.mp4"
         source.write_bytes(data)
-        subprocess.run([
+        run_command([
             "ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe",
             "-c:v", "libvpx-vp9", "-i", str(source), "-filter_complex",
             "[0:v]format=rgba,split[st][base];[base]lutrgb=r=31:g=31:b=31:a=255[bg];"

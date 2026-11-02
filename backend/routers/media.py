@@ -9,6 +9,7 @@ from pydantic import HttpUrl
 from starlette.background import BackgroundTask
 
 from backend.config import MAX_SOURCE_SIZE
+from backend.services.processing import media_capacity, run_blocking
 from backend.models import VideoInfo
 from backend.security import verify_api_key
 from backend.services.file_service import cleanup_files
@@ -29,27 +30,29 @@ router = APIRouter()
     response_model=VideoInfo,
     dependencies=[Security(verify_api_key)],
 )
-def info(
+async def info(
     url: HttpUrl = Query(..., description="Video URL"),
     only_with_video: bool = Query(True, description="Return only formats containing video"),
 ):
     try:
-        return get_video_info(str(url), only_with_video=only_with_video)
+        async with media_capacity:
+            return await run_blocking(get_video_info, str(url), only_with_video=only_with_video)
     except ExtractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/download", dependencies=[Security(verify_api_key)])
-def download(
+async def download(
     url: HttpUrl = Query(..., description="Video URL"),
     format_id: str | None = Query(None, description="Format ID returned by /info"),
     name: str | None = Query(None, description="Output filename without extension"),
     as_attachment: bool = Query(True, description="Return the file as an attachment"),
 ):
     try:
-        file_path, filename, mime_type = download_to_file(
-            str(url), format_id=format_id, name=name
-        )
+        async with media_capacity:
+            file_path, filename, mime_type = await run_blocking(
+                download_to_file, str(url), format_id=format_id, name=name
+            )
     except DownloadFailed as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -67,11 +70,15 @@ def download(
 
 
 @router.post("/convert/sticker", dependencies=[Security(verify_api_key)])
-def convert_sticker(
+async def convert_sticker(
     video: UploadFile = File(..., description="Source video file"),
     start: float = Form(0.0, ge=0.0, allow_inf_nan=False, description="Start time in seconds"),
     end: float | None = Form(None, gt=0.0, allow_inf_nan=False, description="End time in seconds"),
 ):
+    return await run_blocking(_convert_sticker, video, start, end)
+
+
+def _convert_sticker(video, start, end):
     if not video.filename:
         raise HTTPException(status_code=400, detail="No input filename provided")
 

@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
+from backend.services.media.commands import run_command, job_deadline
 
 
 class StickerConversionError(Exception):
@@ -17,7 +18,7 @@ FFMPEG_TIMEOUT = 120
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(
+        return run_command(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -34,15 +35,8 @@ def _run_command(command: list[str]) -> subprocess.CompletedProcess:
 
 
 def _probe_duration(input_path: str) -> float:
-    command = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", input_path,
-    ]
-    try:
-        result = _run_command(command)
-        return float(result.stdout.decode().strip())
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise StickerConversionError("Unable to determine video duration") from exc
+    from backend.services.media.studio_renderer import probe
+    return probe(input_path)[0]
 
 
 def _encode(
@@ -65,6 +59,8 @@ def _encode(
     command = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}",
         *(["-c:v", decoder] if decoder else []),
+        "-protocol_whitelist", "file,pipe",
+        "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv",
         "-i", input_path, "-t", f"{duration:.3f}", "-vf", filter_chain, "-an",
         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0",
     ]
@@ -91,24 +87,25 @@ def _convert_with_quality_search(
     custom_filter: str | None = None,
     decoder: str | None = None,
 ) -> None:
-    target_bitrate_kbit = int((MAX_OUTPUT_SIZE * 8) / (duration * 1000) * 0.85)
-    attempts = [(32, 30, None), (40, 30, None), (48, 25, None), (52, 20, target_bitrate_kbit)]
-    last_size = 0
-    for index, (crf, fps, bitrate) in enumerate(attempts):
-        attempt_path = f"{output_path}.attempt{index}.webm"
-        try:
-            _encode(input_path, attempt_path, start, duration, fps, crf, bitrate, custom_filter, decoder)
-            last_size = os.path.getsize(attempt_path)
-            if last_size <= MAX_OUTPUT_SIZE:
-                os.replace(attempt_path, output_path)
-                return
-        finally:
-            if os.path.exists(attempt_path):
-                os.remove(attempt_path)
-    raise StickerConversionError(
-        f"Unable to fit video sticker into {MAX_FILE_SIZE // 1024} KB "
-        f"(last result: {last_size // 1024} KB)"
-    )
+    with job_deadline(int(os.getenv("MEDIA_JOB_TIMEOUT_SECONDS", "240"))):
+        target_bitrate_kbit = int((MAX_OUTPUT_SIZE * 8) / (duration * 1000) * 0.85)
+        attempts = [(32, 30, None), (40, 30, None), (48, 25, None), (52, 20, target_bitrate_kbit)]
+        last_size = 0
+        for index, (crf, fps, bitrate) in enumerate(attempts):
+            attempt_path = f"{output_path}.attempt{index}.webm"
+            try:
+                _encode(input_path, attempt_path, start, duration, fps, crf, bitrate, custom_filter, decoder)
+                last_size = os.path.getsize(attempt_path)
+                if last_size <= MAX_OUTPUT_SIZE:
+                    os.replace(attempt_path, output_path)
+                    return
+            finally:
+                if os.path.exists(attempt_path):
+                    os.remove(attempt_path)
+        raise StickerConversionError(
+            f"Unable to fit video sticker into {MAX_FILE_SIZE // 1024} KB "
+            f"(last result: {last_size // 1024} KB)"
+        )
 
 
 def convert_video_to_sticker(

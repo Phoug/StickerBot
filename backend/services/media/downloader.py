@@ -3,8 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
+from backend.services.media.ytdlp import extract
 
 
 class DownloadFailed(Exception):
@@ -103,8 +102,7 @@ def download_to_file(
     output_template = str(temp_dir / "video.%(ext)s")
     try:
         options = _ydl_opts(_build_format_selector(format_id), output_template)
-        with YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=True)
+        info = extract(url, options, download=True)
         if not info:
             raise DownloadFailed("yt-dlp returned empty metadata")
         output_path = _find_output_file(temp_dir)
@@ -118,11 +116,6 @@ def download_to_file(
             from backend.services.file_service import cleanup_files
             cleanup_files(temp_dir)
         raise
-    except DownloadError as exc:
-        if created_temp_dir:
-            from backend.services.file_service import cleanup_files
-            cleanup_files(temp_dir)
-        raise DownloadFailed(str(exc)) from exc
     except Exception as exc:
         if created_temp_dir:
             from backend.services.file_service import cleanup_files

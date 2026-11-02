@@ -1,13 +1,17 @@
 """Persistent, owner-scoped registry; source videos expire automatically."""
 import sqlite3
+import os
 from contextlib import contextmanager
 from fastapi import HTTPException
 from backend.config import DATA_DIR
+from backend.maintenance import DATABASE_NAME
+
+SCHEMA_VERSION = 1
 
 @contextmanager
 def database():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DATA_DIR / "stickerbot.sqlite3", timeout=30)
+    connection = sqlite3.connect(DATA_DIR / DATABASE_NAME, timeout=30)
     connection.row_factory = sqlite3.Row
     try:
         yield connection
@@ -17,6 +21,8 @@ def database():
 
 def initialize():
     with database() as db:
+        if db.execute("PRAGMA user_version").fetchone()[0] > SCHEMA_VERSION:
+            raise RuntimeError("Database schema is newer than this application; restore compatible code")
         db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS packs (
@@ -30,6 +36,7 @@ def initialize():
                 published_pack TEXT
             );
         """)
+        db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
 def owned_pack(pack_id, user_id):
     with database() as db:
@@ -37,3 +44,15 @@ def owned_pack(pack_id, user_id):
     if row is None:
         raise HTTPException(404, "Набор не найден")
     return dict(row)
+
+
+def check_ready():
+    """Probe an existing registry without silently creating a missing database."""
+    if not os.access(DATA_DIR, os.W_OK) or not os.access(DATA_DIR / DATABASE_NAME, os.W_OK):
+        raise OSError("Data directory is not writable")
+    connection = sqlite3.connect((DATA_DIR / DATABASE_NAME).resolve().as_uri() + "?mode=rw", uri=True, timeout=1)
+    try:
+        for table in ("packs", "media"):
+            connection.execute(f"SELECT id FROM {table} LIMIT 1")
+    finally:
+        connection.close()

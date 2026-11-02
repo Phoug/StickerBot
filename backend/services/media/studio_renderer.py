@@ -2,11 +2,12 @@ import json
 import math
 import subprocess
 from pathlib import Path
+from backend.services.media.commands import run_command
 from backend.services.media.sticker_converter import StickerConversionError, _convert_with_quality_search
 
 def probe(path, details=False):
     try:
-        result = subprocess.run(
+        result = run_command(
             ["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-select_streams", "v:0", "-show_entries",
              "stream=width,height,codec_name,pix_fmt,sample_aspect_ratio:stream_side_data=rotation:format=duration", "-of", "json", str(path)],
             capture_output=True, check=True, timeout=20)
@@ -28,7 +29,7 @@ def normalize(source, output):
                   and not any(item.get("rotation",0) for item in stream.get("side_data_list",[])))
     if compatible:
         try:
-            subprocess.run(["ffmpeg","-y","-v","error","-protocol_whitelist","file,pipe",
+            run_command(["ffmpeg","-y","-v","error","-protocol_whitelist","file,pipe",
                             "-format_whitelist","mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv",
                             "-i",str(source),"-map","0:v:0","-an","-c:v","copy","-movflags","+faststart",str(output)],
                            capture_output=True,check=True,timeout=60)
@@ -37,7 +38,7 @@ def normalize(source, output):
         except (OSError, subprocess.SubprocessError):
             pass
     try:
-        subprocess.run(
+        run_command(
             ["ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-i", str(source), "-map", "0:v:0", "-an",
              "-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",

@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import time
 import uuid
+import logging
 from pathlib import Path
 from typing import Literal
 
@@ -11,11 +12,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Respons
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
-from starlette.concurrency import run_in_threadpool
+from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
 from backend.services.file_service import cleanup_files
 from backend.services.media.sticker_preview import make_video_preview
 
-from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL
+from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL, CLEANUP_INTERVAL
 from backend.routers.stickers import telegram, update_pack, user_operation, find_sticker
 from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
@@ -27,7 +28,9 @@ from backend.storage import database, owned_pack
 from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
 
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
-_processing = asyncio.Semaphore(2)
+logger = logging.getLogger(__name__)
+cleanup_last_success = 0.0
+cleanup_last_error = False
 _edit_sources = {}
 _link_sources = {}
 
@@ -64,18 +67,26 @@ class Publish(BaseModel):
         return value
 
 def cleanup_expired():
+    global cleanup_last_success, cleanup_last_error
     with database() as db:
         rows = db.execute("SELECT id,path FROM media WHERE created_at<?", (time.time() - SOURCE_TTL,)).fetchall()
         for row in rows:
             Path(row["path"]).unlink(missing_ok=True)
             Path(row["path"]).with_suffix(".original.webm").unlink(missing_ok=True)
             db.execute("DELETE FROM media WHERE id=?", (row["id"],))
+    cleanup_last_success = time.time()
+    cleanup_last_error = False
 
 
 async def maintain_media():
+    global cleanup_last_error
     while True:
-        await run_in_threadpool(cleanup_expired)
-        await asyncio.sleep(300)
+        await asyncio.sleep(CLEANUP_INTERVAL)
+        try:
+            await run_in_threadpool(cleanup_expired)
+        except Exception:
+            cleanup_last_error = True
+            logger.exception("Media cleanup failed; retrying at the next interval")
 
 def register(path, user_id, kind, duration):
     media_id = uuid.uuid4().hex
@@ -109,7 +120,7 @@ def prepare(source, folder, user_id, photo=False):
 @router.post("/upload", status_code=201)
 async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
     try:
-        async with user_operation(user["id"]), _processing:
+        async with user_operation(user["id"]):
             await run_in_threadpool(cleanup_expired)
             with tempfile.TemporaryDirectory(prefix="sticker_upload_") as folder:
                 source = Path(folder) / "upload"
@@ -128,18 +139,11 @@ async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
 
 def download_source(url, user_id):
     # A dedicated limited download; legacy bot downloads retain their own behavior.
-    from yt_dlp import YoutubeDL
+    from backend.services.media.ytdlp import extract
     with tempfile.TemporaryDirectory(prefix="sticker_link_") as folder:
-        def limit(progress):
-            if progress.get("downloaded_bytes", 0) > MAX_SOURCE_SIZE:
-                raise DownloadFailed("Видео должно быть не больше 50 МБ")
         options = _ydl_opts("bv*[height<=1080]+ba/b[height<=1080]", str(Path(folder) / "download.%(ext)s"))
-        options.update({"max_filesize": MAX_SOURCE_SIZE, "progress_hooks": [limit],
-                        "match_filter": lambda info, *, incomplete=False: "Видео длиннее 10 минут" if (info.get("duration") or 0) > 600 else None,
-                        "concurrent_fragment_downloads": 1, "retries": 1, "extractor_retries": 1})
         try:
-            with YoutubeDL(options) as ydl:
-                ydl.extract_info(url, download=True)
+            extract(url, options, download=True)
             files = list(Path(folder).glob("download.*"))
             files = [p for p in files if p.suffix == ".mp4"]
             if not files:

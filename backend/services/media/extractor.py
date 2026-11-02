@@ -1,7 +1,6 @@
 from typing import Any
 
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
+from backend.services.media.ytdlp import extract
 
 
 class ExtractError(Exception):
@@ -22,10 +21,7 @@ YDL_BASE_OPTIONS: dict[str, Any] = {
 
 def _extract_info(url: str) -> dict:
     try:
-        with YoutubeDL(YDL_BASE_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except DownloadError as exc:
-        raise ExtractError(str(exc)) from exc
+        info = extract(url, YDL_BASE_OPTIONS)
     except Exception as exc:
         raise ExtractError(f"Unexpected error: {exc}") from exc
 

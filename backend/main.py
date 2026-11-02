@@ -7,28 +7,35 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from backend.routers import media, stickers, system, studio
-from backend.storage import initialize
+from backend import storage
+from backend.config import BOT_TOKEN, API_SECRET_TOKEN
+from backend.maintenance import exclusive_access
+from backend.observability import RuntimeMiddleware
+from backend.services.bot_api import telegram
+from backend.services.processing import run_blocking
+from common.logging import configure_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+configure_logging(BOT_TOKEN, API_SECRET_TOKEN)
 logger = logging.getLogger("video_backend")
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    logger.info("Backend started")
-    initialize()
-    cleanup_task = asyncio.create_task(studio.maintain_media())
-    logger.info("Mini App authentication enabled")
-    yield
-    cleanup_task.cancel()
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    logger.info("Backend stopped")
+    with exclusive_access(storage.DATA_DIR):
+        storage.initialize()
+        await run_blocking(studio.cleanup_expired)
+        cleanup_task = asyncio.create_task(studio.maintain_media())
+        logger.info("Backend started; Mini App authentication enabled")
+        try:
+            yield
+        finally:
+            cleanup_task.cancel()
+            try:
+                await cleanup_task
+            except asyncio.CancelledError:
+                pass
+            await telegram.close()
+            logger.info("Backend stopped")
 
 
 app = FastAPI(
@@ -39,6 +46,7 @@ app = FastAPI(
     openapi_url=None,
     lifespan=lifespan,
 )
+app.add_middleware(RuntimeMiddleware)
 
 app.include_router(system.router)
 app.include_router(media.router)

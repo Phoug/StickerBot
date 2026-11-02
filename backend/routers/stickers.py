@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
-from starlette.concurrency import run_in_threadpool
+from backend.services.processing import media_capacity as _preview_processing, run_blocking as run_in_threadpool
 from backend.security import mini_app_user
 from backend.services.bot_api import telegram
 from backend.storage import database, owned_pack
@@ -19,7 +19,6 @@ from backend.services.media.preview_cache import cached_media
 router = APIRouter(prefix="/api/packs", tags=["Sticker packs"])
 _busy: set[int] = set()
 _preview_files: dict[tuple[str, int], tuple[float, set[str]]] = {}
-_preview_processing = asyncio.Semaphore(2)
 
 
 def cache_previews(pack_id, user_id, actual):
