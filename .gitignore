@@ -1,6 +1,6 @@
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.session
@@ -11,3 +11,7 @@ tests/.artifacts/
 
 frontend/node_modules/
 app/webapp/
+test-results/
+backups/
+.cache/
+.direnv/
