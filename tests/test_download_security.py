@@ -1,4 +1,5 @@
 import json
+import io
 import signal
 import socket
 import subprocess
@@ -7,6 +8,20 @@ import pytest
 
 from backend.services.media import ytdlp
 from backend.services.media.network import public_network
+from backend.services.media import ytdlp_worker
+
+
+def test_worker_response_stays_valid_json_when_downloader_prints_progress(monkeypatch, capsys):
+    def noisy_download(job):
+        print("[download] 100% of video.mp4")
+        return {"id": "video"}
+
+    monkeypatch.setattr(ytdlp_worker, "execute", noisy_download)
+    monkeypatch.setattr(ytdlp_worker.sys, "stdin", io.StringIO('{"download": true}'))
+    assert ytdlp_worker.main() == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"ok": True, "info": {"id": "video"}}
+    assert "[download]" in captured.err
 
 
 @pytest.mark.parametrize("url", ["http://127.0.0.1/a", "https://[::1]/a", "https://169.254.169.254/a",

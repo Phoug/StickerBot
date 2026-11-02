@@ -1,4 +1,5 @@
 """Internal JSON worker. No bot credentials, .env, or API imports are needed."""
+from contextlib import redirect_stdout
 import json
 import sys
 
@@ -44,6 +45,7 @@ def execute(job):
             return "Видео должно быть не длиннее 10 минут; трансляции не поддерживаются"
 
     options.update({
+        "logtostderr": True, "noprogress": True,
         "cachedir": False,
         "proxy": "", "usenetrc": False, "enable_file_urls": False,
         "external_downloader": {"default": "native"}, "hls_prefer_native": True,
@@ -59,7 +61,11 @@ def execute(job):
 
 def main():
     try:
-        result = execute(json.load(sys.stdin))
+        job = json.load(sys.stdin)
+        # stdout is the parent/worker protocol, including when a downloader or
+        # postprocessor prints progress despite quiet mode.
+        with redirect_stdout(sys.stderr):
+            result = execute(job)
         print(json.dumps({"ok": True, "info": result}))
     except Exception as exc:
         # Network libraries can include URLs and headers in their exceptions.
