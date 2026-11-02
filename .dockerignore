@@ -4,6 +4,7 @@
 **/.classpath
 **/.dockerignore
 **/.env
+**/.env.*
 **/.git
 **/.gitignore
 **/.project
@@ -32,3 +33,7 @@ data
 tests
 
 app/webapp
+test-results
+backups
+.cache
+.direnv
