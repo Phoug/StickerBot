@@ -18,5 +18,5 @@ backups/
 .cache/
 .direnv/
 
-.agents
+.agents/
 flake.*
