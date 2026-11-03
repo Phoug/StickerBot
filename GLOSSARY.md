@@ -17,3 +17,6 @@ It does not change the sticker published in Telegram.
 
 **Publication**: Adding a render to a pack or replacing a specific sticker with it.
 Repeating a completed publication does not add or replace another sticker.
+
+**Studio**: The workspace for preparing a source, editing it into a render,
+previewing the result and publishing it to a pack.
