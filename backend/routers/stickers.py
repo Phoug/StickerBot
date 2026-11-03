@@ -2,7 +2,6 @@ import asyncio
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
@@ -13,8 +12,9 @@ from backend.storage import database, owned_pack
 from backend.services.media.sticker_preview import video_preview
 from backend.services.media.preview_cache import cached_media
 
+from backend.services.publication import user_operation, update_pack, find_sticker
+
 router = APIRouter(prefix="/api/packs", tags=["Sticker packs"])
-_busy: set[int] = set()
 _preview_files: dict[tuple[str, int], tuple[float, set[str]]] = {}
 
 
@@ -24,17 +24,6 @@ def cache_previews(pack_id, user_id, actual):
     allowed = {(s.get("thumbnail") or s)["file_id"] for s in actual["stickers"]}
     _preview_files[(pack_id, user_id)] = (time.monotonic() + 60, allowed)
     return allowed
-
-@asynccontextmanager
-async def user_operation(user_id):
-    # Single API worker; reject concurrent writes to avoid duplicate publishing.
-    if user_id in _busy:
-        raise HTTPException(409, "Дождитесь завершения текущей операции")
-    _busy.add(user_id)
-    try:
-        yield
-    finally:
-        _busy.discard(user_id)
 
 class CreatePack(BaseModel):
     title: str = Field(min_length=1, max_length=64)
@@ -71,12 +60,6 @@ def serialize_pack(pack, actual):
     return pack
 
 
-def find_sticker(actual, sticker_id):
-    sticker = next((s for s in actual["stickers"] if s["file_unique_id"] == sticker_id), None)
-    if sticker is None:
-        raise HTTPException(404, "Стикер не найден в этом наборе")
-    return sticker
-
 def parse_pack_name(value):
     value = value.strip()
     if "://" in value:
@@ -90,10 +73,6 @@ def parse_pack_name(value):
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value):
         raise HTTPException(422, "Некорректное имя набора")
     return value
-
-def update_pack(pack_id, **fields):
-    with database() as db:
-        db.execute(f"UPDATE packs SET {', '.join(key + '=?' for key in fields)} WHERE id=?", [*fields.values(), pack_id])
 
 def input_sticker(sticker):
     return {

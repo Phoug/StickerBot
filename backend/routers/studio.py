@@ -16,7 +16,8 @@ from backend.services.processing import media_capacity as _processing, run_block
 from backend.services.media.sticker_preview import video_preview
 
 from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL, CLEANUP_INTERVAL
-from backend.routers.stickers import telegram, update_pack, user_operation, find_sticker
+from backend.services.bot_api import telegram
+from backend.services.publication import publish_render, user_operation, find_sticker
 from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
 from backend.services.media.sticker_converter import StickerConversionError
@@ -264,42 +265,7 @@ async def publish(pack_id: str, payload: Publish, user=Depends(mini_app_user)):
     async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         media = owned_media(payload.render_id, user["id"])
-        if media["kind"] not in {"render", "render_photo"}:
-            raise HTTPException(422, "Сначала создайте стикер в редакторе")
-        if media["published_pack"]:
-            if media["published_pack"] == pack_id:
-                return owned_pack(pack_id, user["id"])
-            raise HTTPException(409, "Этот стикер уже сохранён в другом наборе")
-        if pack["status"] == "import_pending":
-            raise HTTPException(409, "Сначала завершите импорт набора")
-        uploaded = await telegram.upload(user["id"], Path(media["path"]))
-        sticker = {"sticker": uploaded["file_id"], "format": "static" if media["kind"] == "render_photo" else "video", "emoji_list": [payload.emoji]}
-        # Recover a createNewStickerSet response lost after Telegram accepted it.
-        try:
-            actual = await telegram.call("getStickerSet", name=pack["name"])
-        except HTTPException as exc:
-            if "STICKERSET_INVALID" not in str(exc.detail):
-                raise
-            actual = None
-        if actual:
-            already_added = any(s["file_unique_id"] == uploaded["file_unique_id"] for s in actual["stickers"])
-            if not already_added:
-                if payload.replace_id:
-                    old = find_sticker(actual, payload.replace_id)
-                    await telegram.call("replaceStickerInSet", user_id=user["id"], name=pack["name"], old_sticker=old["file_id"], sticker=sticker)
-                elif len(actual["stickers"]) >= 120:
-                    raise HTTPException(422, "В наборе уже 120 стикеров")
-                else:
-                    await telegram.call("addStickerToSet", user_id=user["id"], name=pack["name"], sticker=sticker)
-        else:
-            if payload.replace_id:
-                raise HTTPException(409, "Набор изменился. Откройте его заново.")
-            await telegram.call("createNewStickerSet", user_id=user["id"], name=pack["name"], title=pack["title"], stickers=[sticker])
-        actual = await telegram.call("getStickerSet", name=pack["name"])
-        update_pack(pack_id, status="ready", count=len(actual["stickers"]), error=None)
-        with database() as db:
-            db.execute("UPDATE media SET published_pack=? WHERE id=?", (pack_id, payload.render_id))
-        return owned_pack(pack_id, user["id"])
+        return await publish_render(pack, media, payload.emoji, payload.replace_id, telegram)
 
 
 @router.post("/packs/{pack_id}/stickers/{sticker_id}/edit", status_code=201)

@@ -3,6 +3,7 @@ import hmac
 import json
 import time
 from urllib.parse import urlencode
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -495,3 +496,73 @@ def test_repeat_video_link_reuses_owned_source_and_skips_tiktok_photo_probe(clie
     assert first['id']==second['id'] and calls==[7]
     other=api.post('/api/studio/link',json=payload,headers=auth(8)).json()
     assert other['id']!=first['id'] and calls==[7,8]
+
+
+def test_replacement_rejects_file_already_used_by_another_sticker(
+    client: tuple[TestClient, FakeTelegram, Path],
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"already present")
+    media = studio.register(source, 7, "render_photo", 0)
+    existing_id = hashlib.sha256(b"already present").hexdigest()
+    fake.sets[pack["name"]]["stickers"][1].update(
+        file_id=existing_id, file_unique_id=existing_id,
+    )
+    old_id = fake.sets[pack["name"]]["stickers"][0]["file_unique_id"]
+    response = api.post(
+        f"/api/studio/packs/{pack['id']}/publish",
+        json={"render_id": media["id"], "replace_id": old_id, "emoji": "🙂"},
+        headers=auth(),
+    )
+    assert response.status_code == 409
+    assert fake.sets[pack["name"]]["stickers"][0]["file_unique_id"] == old_id
+    assert studio.owned_media(media["id"], 7)["published_pack"] is None
+
+
+def test_replacement_recovers_lost_success_response(
+    client: tuple[TestClient, FakeTelegram, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"new replacement")
+    media = studio.register(source, 7, "render_photo", 0)
+    old_id = fake.sets[pack["name"]]["stickers"][0]["file_unique_id"]
+    original_call = fake.call
+    lost = False
+
+    async def call(method: str, **payload: object) -> object:
+        nonlocal lost
+        result = await original_call(method, **payload)
+        if method == "replaceStickerInSet" and not lost:
+            lost = True
+            raise HTTPException(502, "Response lost after replacement")
+        return result
+
+    monkeypatch.setattr(fake, "call", call)
+    route = f"/api/studio/packs/{pack['id']}/publish"
+    payload = {"render_id": media["id"], "replace_id": old_id, "emoji": "🙂"}
+    assert api.post(route, json=payload, headers=auth()).status_code == 502
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    assert all(s["file_unique_id"] != old_id for s in fake.sets[pack["name"]]["stickers"])
+
+
+def test_completed_publication_cannot_be_reused_for_another_target(
+    client: tuple[TestClient, FakeTelegram, Path],
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"new replacement")
+    media = studio.register(source, 7, "render_photo", 0)
+    stickers_in_pack = fake.sets[pack["name"]]["stickers"]
+    first_id, other_id = [s["file_unique_id"] for s in stickers_in_pack[:2]]
+    route = f"/api/studio/packs/{pack['id']}/publish"
+    payload = {"render_id": media["id"], "replace_id": first_id, "emoji": "🙂"}
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    response = api.post(route, json={**payload, "replace_id": other_id}, headers=auth())
+    assert response.status_code == 409
+    assert any(s["file_unique_id"] == other_id for s in stickers_in_pack)
