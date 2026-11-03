@@ -7,7 +7,7 @@ from PIL import Image
 
 from backend.services.media.photo_links import tiktok_photos, validate_url, PublicResolver
 from backend.services.media.sticker_converter import StickerConversionError
-from test_api import client, auth
+from tests.support import auth
 from backend.routers import studio
 from backend import storage
 
