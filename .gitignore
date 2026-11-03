@@ -1,8 +1,10 @@
 .env
 .env.*
 !.env.example
+/.aws/
 .venv/
 __pycache__/
+*.py[cod]
 *.session
 *.session-journal
 data/
@@ -15,3 +17,5 @@ test-results/
 backups/
 .cache/
 .direnv/
+
+flake.*
