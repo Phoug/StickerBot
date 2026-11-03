@@ -1,116 +1,15 @@
 import hashlib
-import hmac
-import json
-import time
 from urllib.parse import urlencode
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from backend.config import BOT_TOKEN
-from backend.main import app
 from backend import storage
 from backend.routers import studio, stickers
+from backend.services.media import sticker_preview
 
-def auth(user_id=7):
-    data = {"auth_date": str(int(time.time())), "user": json.dumps({"id": user_id, "first_name": "Test"})}
-    check = "\n".join(f"{key}={value}" for key, value in sorted(data.items()))
-    secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-    data["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
-    return {"X-Telegram-Init-Data": urlencode(data)}
-
-class FakeTelegram:
-    def __init__(self):
-        self.sets = {}
-        self.fail_add = False
-        self.created = 0
-        self.added = 0
-        self.deleted = []
-        self.fail_delete = False
-        self.moves = []
-        self.fail_move_at = None
-        self.removed_stickers = []
-
-    async def call(self, method, **payload):
-        if method == "getMe":
-            return {"username": "test_studio_bot"}
-        if method in {"deleteStickerFromSet", "setStickerPositionInSet", "setStickerEmojiList"}:
-            target = next((pack["stickers"] for pack in self.sets.values()
-                           if any(s["file_id"] == payload["sticker"] for s in pack["stickers"])), None)
-            if target is None:
-                raise HTTPException(502, "STICKER_INVALID")
-            item = next(s for s in target if s["file_id"] == payload["sticker"])
-            if method == "deleteStickerFromSet":
-                self.removed_stickers.append(payload["sticker"])
-                target.remove(item)
-                return True
-            if method == "setStickerEmojiList":
-                item["emoji"] = payload["emoji_list"][0]
-                return True
-            if self.fail_move_at is not None and len(self.moves) == self.fail_move_at:
-                raise HTTPException(502, "Telegram недоступен")
-            self.moves.append((payload["sticker"], payload["position"]))
-            target.remove(item)
-            target.insert(payload["position"], item)
-            return True
-        if method == "deleteStickerSet":
-            if self.fail_delete:
-                raise HTTPException(502, "Telegram недоступен")
-            if payload["name"] not in self.sets:
-                raise HTTPException(502, "Telegram: STICKERSET_INVALID")
-            self.deleted.append(payload["name"])
-            del self.sets[payload["name"]]
-            return True
-        if method == "getStickerSet":
-            if payload["name"] not in self.sets:
-                raise HTTPException(502, "Telegram: Bad Request: STICKERSET_INVALID")
-            return self.sets[payload["name"]]
-        if method == "createNewStickerSet":
-            self.created += 1
-            self.sets[payload["name"]] = {"sticker_type": "regular", "stickers": [self.sticker(s) for s in payload["stickers"]]}
-            return True
-        if method == "replaceStickerInSet":
-            target = self.sets[payload["name"]]["stickers"]
-            index = next(i for i, item in enumerate(target) if item["file_id"] == payload["old_sticker"])
-            target[index] = self.sticker(payload["sticker"])
-            return True
-        if method == "addStickerToSet":
-            if self.fail_add:
-                self.fail_add = False
-                raise HTTPException(502, "Temporary import error")
-            self.added += 1
-            target = self.sets[payload["name"]]["stickers"]
-            sticker = self.sticker(payload["sticker"])
-            if sticker["file_id"] not in {s["file_id"] for s in target}:
-                target.append(sticker)
-            return True
-        raise AssertionError(method)
-
-    def sticker(self, input_sticker):
-        file_id = input_sticker["sticker"]
-        return {"file_id": file_id, "file_unique_id": file_id, "emoji": input_sticker["emoji_list"][0],
-                "is_video": input_sticker["format"] == "video", "is_animated": input_sticker["format"] == "animated"}
-
-    async def upload(self, user_id, path):
-        file_id = hashlib.sha256(path.read_bytes()).hexdigest()
-        return {"file_id": file_id, "file_unique_id": file_id}
-
-    async def file(self, file_id):
-        return b"test-image-bytes", "image/webp"
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(storage, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(studio, "DATA_DIR", tmp_path)
-    from backend.services.media.preview_cache import _items
-    _items.clear()
-    studio._link_sources.clear()
-    studio._edit_sources.clear()
-    fake = FakeTelegram()
-    monkeypatch.setattr(stickers, "telegram", fake)
-    monkeypatch.setattr(studio, "telegram", fake)
-    with TestClient(app) as client:
-        yield client, fake, tmp_path
+from tests.support import auth, FakeTelegram
 
 def create(client, **body):
     return client.post("/api/packs", json={"title": "Реакции", **body}, headers=auth())
@@ -333,7 +232,7 @@ def test_render_preview_is_private_mp4_and_cleans_up(client, monkeypatch, tmp_pa
     preview_folder.mkdir()
     output = preview_folder / "preview.mp4"
     output.write_bytes(b"mp4")
-    monkeypatch.setattr(studio, "make_video_preview", lambda data: output)
+    monkeypatch.setattr(sticker_preview, "make_video_preview", lambda data: output)
     route = "/api/studio/media/"+media["id"]+"?preview=true"
     assert api.get(route, headers=auth(8)).status_code == 404
     response = api.get(route, headers=auth())
@@ -436,7 +335,7 @@ def test_video_edit_retains_private_original_until_expiry(client, monkeypatch):
     preview_folder=folder/"temporary-preview"
     preview_folder.mkdir()
     preview=preview_folder/"preview.mp4";preview.write_bytes(b"browser-preview")
-    monkeypatch.setattr(studio,"make_video_preview",lambda data: preview)
+    monkeypatch.setattr(sticker_preview,"make_video_preview",lambda data: preview)
     monkeypatch.setattr(studio,"probe",lambda path: (1,512,288))
     response=api.post(f"/api/studio/packs/{pack['id']}/stickers/id-1/edit",headers=auth())
     assert response.status_code == 201
@@ -467,10 +366,7 @@ def test_viewer_and_editor_share_preview_and_reopening_editor_reuses_source(clie
         temp = folder/'shared-preview';temp.mkdir()
         output = temp/'preview.mp4';output.write_bytes(b'mp4-preview')
         return output
-    monkeypatch.setattr(stickers,'make_video_preview',preview)
-    def forbidden(data):
-        raise AssertionError('Editor must reuse the viewer MP4')
-    monkeypatch.setattr(studio,'make_video_preview',forbidden)
+    monkeypatch.setattr(sticker_preview, 'make_video_preview', preview)
     monkeypatch.setattr(studio,'probe',lambda path: (1,512,288))
     root=f'/api/packs/{pack["id"]}/stickers/id-1'
     assert api.get(root+'/file',headers=auth()).content==b'mp4-preview'
@@ -497,3 +393,73 @@ def test_repeat_video_link_reuses_owned_source_and_skips_tiktok_photo_probe(clie
     assert first['id']==second['id'] and calls==[7]
     other=api.post('/api/studio/link',json=payload,headers=auth(8)).json()
     assert other['id']!=first['id'] and calls==[7,8]
+
+
+def test_replacement_rejects_file_already_used_by_another_sticker(
+    client: tuple[TestClient, FakeTelegram, Path],
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"already present")
+    media = studio.register(source, 7, "render_photo", 0)
+    existing_id = hashlib.sha256(b"already present").hexdigest()
+    fake.sets[pack["name"]]["stickers"][1].update(
+        file_id=existing_id, file_unique_id=existing_id,
+    )
+    old_id = fake.sets[pack["name"]]["stickers"][0]["file_unique_id"]
+    response = api.post(
+        f"/api/studio/packs/{pack['id']}/publish",
+        json={"render_id": media["id"], "replace_id": old_id, "emoji": "🙂"},
+        headers=auth(),
+    )
+    assert response.status_code == 409
+    assert fake.sets[pack["name"]]["stickers"][0]["file_unique_id"] == old_id
+    assert studio.owned_media(media["id"], 7)["published_pack"] is None
+
+
+def test_replacement_recovers_lost_success_response(
+    client: tuple[TestClient, FakeTelegram, Path], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"new replacement")
+    media = studio.register(source, 7, "render_photo", 0)
+    old_id = fake.sets[pack["name"]]["stickers"][0]["file_unique_id"]
+    original_call = fake.call
+    lost = False
+
+    async def call(method: str, **payload: object) -> object:
+        nonlocal lost
+        result = await original_call(method, **payload)
+        if method == "replaceStickerInSet" and not lost:
+            lost = True
+            raise HTTPException(502, "Response lost after replacement")
+        return result
+
+    monkeypatch.setattr(fake, "call", call)
+    route = f"/api/studio/packs/{pack['id']}/publish"
+    payload = {"render_id": media["id"], "replace_id": old_id, "emoji": "🙂"}
+    assert api.post(route, json=payload, headers=auth()).status_code == 502
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    assert all(s["file_unique_id"] != old_id for s in fake.sets[pack["name"]]["stickers"])
+
+
+def test_completed_publication_cannot_be_reused_for_another_target(
+    client: tuple[TestClient, FakeTelegram, Path],
+) -> None:
+    api, fake, folder = client
+    pack = seeded_pack(api, fake)
+    source = folder / "replacement.webp"
+    source.write_bytes(b"new replacement")
+    media = studio.register(source, 7, "render_photo", 0)
+    stickers_in_pack = fake.sets[pack["name"]]["stickers"]
+    first_id, other_id = [s["file_unique_id"] for s in stickers_in_pack[:2]]
+    route = f"/api/studio/packs/{pack['id']}/publish"
+    payload = {"render_id": media["id"], "replace_id": first_id, "emoji": "🙂"}
+    assert api.post(route, json=payload, headers=auth()).status_code == 200
+    response = api.post(route, json={**payload, "replace_id": other_id}, headers=auth())
+    assert response.status_code == 409
+    assert any(s["file_unique_id"] == other_id for s in stickers_in_pack)

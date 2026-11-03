@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -7,9 +8,9 @@ import {
   waitFor,
 } from "@testing-library/react";
 import App from "./App";
-import { json, request, tg } from "./api";
-import { trim, Editor, cropOverflow } from "./Editor";
-vi.mock("./api", () => ({
+import { json, request, tg } from "../api";
+import { trim, Editor, cropOverflow } from "../studio/Editor";
+vi.mock("../api", () => ({
   tg: {
     initData: "test",
     ready: vi.fn(),
@@ -55,6 +56,122 @@ beforeEach(() => {
   vi.mocked(request).mockResolvedValue(new Response(null, { status: 204 }));
 });
 afterEach(cleanup);
+
+function telegramBack() {
+  const listener = vi.mocked(tg!.BackButton!.onClick).mock.calls.at(-1)![0];
+  act(() => listener());
+}
+
+it("publishes a Studio render and opens the updated Pack order", async () => {
+  let published = false;
+  const current = () =>
+    published
+      ? {
+          ...pack,
+          count: 3,
+          stickers: [
+            ...pack.stickers,
+            { id: "new", emoji: "🙂", preview_id: "tn" },
+          ],
+        }
+      : structuredClone(pack);
+  vi.mocked(json).mockImplementation(async (path) => {
+    if (path === "/api/packs") return { packs: [structuredClone(pack)] };
+    if (path === "/api/studio/link")
+      return { id: "source", kind: "photo", duration: 0 };
+    if (path === "/api/studio/render")
+      return { id: "render", kind: "photo", duration: 0 };
+    if (path.endsWith("/publish")) published = true;
+    return current();
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Добавить стикер" }),
+  );
+  fireEvent.change(document.getElementById("video-link")!, {
+    target: { value: "https://example.com/photo.png" },
+  });
+  fireEvent.submit(document.getElementById("link-form")!);
+  const renderButton = await screen.findByRole("button", {
+    name: /Посмотреть результат/,
+  });
+  await waitFor(() =>
+    expect((renderButton as HTMLButtonElement).disabled).toBe(false),
+  );
+  fireEvent.click(renderButton);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Добавить в набор" }),
+  );
+  await screen.findByLabelText("Эмодзи стикера 3");
+  expect(json).toHaveBeenCalledWith("/api/studio/packs/p/publish", {
+    render_id: "render",
+    emoji: "🙂",
+    replace_id: null,
+  });
+});
+
+it("Telegram back closes viewing before leaving the order draft", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Редактировать" }));
+  fireEvent.change(screen.getByLabelText("Эмодзи стикера 1"), {
+    target: { value: "🥹" },
+  });
+  fireEvent.click(screen.getByLabelText("Посмотреть стикер 1"));
+  telegramBack();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(
+    (screen.getByLabelText("Эмодзи стикера 1") as HTMLInputElement).value,
+  ).toBe("🥹");
+  telegramBack();
+  expect(screen.queryByLabelText("Эмодзи стикера 1")).toBeNull();
+  expect(screen.getByRole("heading", { name: "Реакции" })).toBeTruthy();
+});
+
+it("keeps the order draft when opening a replacement fails", async () => {
+  vi.mocked(json).mockImplementation(async (path) => {
+    if (path.endsWith("/edit")) throw Error("Редактор временно недоступен");
+    return path === "/api/packs"
+      ? { packs: [structuredClone(pack)] }
+      : structuredClone(pack);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Редактировать" }));
+  fireEvent.change(screen.getByLabelText("Эмодзи стикера 1"), {
+    target: { value: "🥹" },
+  });
+  fireEvent.click(screen.getByLabelText("Посмотреть стикер 1"));
+  fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+  await screen.findByRole("alert");
+  expect(
+    (screen.getByLabelText("Эмодзи стикера 1") as HTMLInputElement).value,
+  ).toBe("🥹");
+});
+
+it("returns from replacement editing to the same order draft", async () => {
+  vi.mocked(json).mockImplementation(async (path) => {
+    if (path.endsWith("/edit"))
+      return { id: "photo", kind: "photo", duration: 0 };
+    return path === "/api/packs"
+      ? { packs: [structuredClone(pack)] }
+      : structuredClone(pack);
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Реакции/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Редактировать" }));
+  fireEvent.change(screen.getByLabelText("Эмодзи стикера 1"), {
+    target: { value: "🥹" },
+  });
+  fireEvent.click(screen.getByLabelText("Посмотреть стикер 1"));
+  fireEvent.click(screen.getByRole("button", { name: "Редактировать" }));
+  await screen.findByRole("heading", { name: "Редактор фото" });
+  telegramBack();
+  expect(
+    (screen.getByLabelText("Эмодзи стикера 1") as HTMLInputElement).value,
+  ).toBe("🥹");
+});
 describe("React page flows", () => {
   it("opens a pack, changes emoji and saves order", async () => {
     render(<App />);

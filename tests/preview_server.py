@@ -24,7 +24,7 @@ from backend.main import app
 from backend.routers import stickers, studio
 from backend.security import mini_app_user
 from backend.storage import initialize, database
-from test_api import FakeTelegram
+from tests.support import FakeTelegram
 
 
 class PreviewTelegram(FakeTelegram):

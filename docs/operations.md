@@ -193,10 +193,25 @@ python3 -m backend.backup verify /tmp/stickerbot-recovery-check/stickerbot.sqlit
 После восстановления исходники без файлов запрашиваются заново; опубликованные
 стикеры остаются в Telegram. Действия Telegram не откатываются вместе с SQLite.
 
-`PRAGMA user_version=1` фиксирует текущую схему. Старые базы получают эту версию
+`PRAGMA user_version=2` фиксирует текущую схему. Старые базы получают эту версию
 при совместимом старте; база с более новой версией отвергается. Новые изменения
 схемы требуют отдельной миграции, предварительного снимка и проверки
 совместимости старого и нового кода. Не меняйте схему вручную в production.
+
+### Publication schema migration (version 2)
+
+Before deploying this version, create and verify a database snapshot. Startup
+adds the nullable `media.published_replace_id` column to version 0/1 databases
+and preserves their existing rows. The column records the target of a completed
+replacement so retries cannot silently publish to a different target. Pack and
+publication completion updates commit in one transaction.
+
+Existing completed publications have no historical replacement target. Adding
+retries remains compatible; retrying an old replacement can return a conflict.
+Reopen the pack to inspect the published sticker before starting another edit.
+Older application versions reject schema version 2. To roll back, restore the
+pre-migration snapshot into a new data directory using the recovery procedure;
+Telegram changes made after that snapshot are not rolled back.
 
 ## Практические проверки обслуживания
 

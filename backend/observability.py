@@ -125,7 +125,7 @@ class RuntimeMiddleware:
 
 
 def metrics_text():
-    from backend.routers import studio
+    from backend.services import media_store
     from backend.services.processing import media_capacity
     lines = [
         "# TYPE stickerbot_media_jobs_active gauge",
@@ -133,7 +133,7 @@ def metrics_text():
         f"stickerbot_media_jobs_capacity {media_capacity.limit}",
         f"stickerbot_media_jobs_completed_total {media_capacity.completed}",
         f"stickerbot_media_jobs_failed_total {media_capacity.failed}",
-        f"stickerbot_cleanup_last_success_timestamp_seconds {studio.cleanup_last_success}",
+        f"stickerbot_cleanup_last_success_timestamp_seconds {media_store.cleanup_last_success}",
     ]
     counts, totals = requests.copy(), duration_sum.copy()
     for (method, route, status), count in sorted(counts.items()):

@@ -7,14 +7,11 @@ import time
 import pytest
 from fastapi import HTTPException
 
-from test_api import client as api_client_fixture, auth
+from tests.support import auth
 from app.bot import health
 from backend.observability import RuntimeMiddleware
 from backend.services.processing import MediaCapacity, run_blocking, media_capacity
 from common.logging import JsonFormatter
-
-client = api_client_fixture  # Re-export the shared pytest fixture.
-
 
 def test_readiness_detects_missing_registry_without_recreating_it(client):
     api, _, folder = client

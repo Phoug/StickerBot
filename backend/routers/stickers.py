@@ -2,22 +2,19 @@ import asyncio
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
-from backend.services.processing import media_capacity as _preview_processing, run_blocking as run_in_threadpool
 from backend.security import mini_app_user
 from backend.services.bot_api import telegram
 from backend.storage import database, owned_pack
-from backend.services.file_service import cleanup_files
-from backend.services.media.sticker_preview import make_video_preview
-from backend.services.media.sticker_converter import StickerConversionError
+from backend.services.media.sticker_preview import video_preview
 from backend.services.media.preview_cache import cached_media
 
+from backend.services.publication import user_operation, update_pack, find_sticker
+
 router = APIRouter(prefix="/api/packs", tags=["Sticker packs"])
-_busy: set[int] = set()
 _preview_files: dict[tuple[str, int], tuple[float, set[str]]] = {}
 
 
@@ -27,17 +24,6 @@ def cache_previews(pack_id, user_id, actual):
     allowed = {(s.get("thumbnail") or s)["file_id"] for s in actual["stickers"]}
     _preview_files[(pack_id, user_id)] = (time.monotonic() + 60, allowed)
     return allowed
-
-@asynccontextmanager
-async def user_operation(user_id):
-    # Single API worker; reject concurrent writes to avoid duplicate publishing.
-    if user_id in _busy:
-        raise HTTPException(409, "Дождитесь завершения текущей операции")
-    _busy.add(user_id)
-    try:
-        yield
-    finally:
-        _busy.discard(user_id)
 
 class CreatePack(BaseModel):
     title: str = Field(min_length=1, max_length=64)
@@ -74,12 +60,6 @@ def serialize_pack(pack, actual):
     return pack
 
 
-def find_sticker(actual, sticker_id):
-    sticker = next((s for s in actual["stickers"] if s["file_unique_id"] == sticker_id), None)
-    if sticker is None:
-        raise HTTPException(404, "Стикер не найден в этом наборе")
-    return sticker
-
 def parse_pack_name(value):
     value = value.strip()
     if "://" in value:
@@ -93,10 +73,6 @@ def parse_pack_name(value):
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value):
         raise HTTPException(422, "Некорректное имя набора")
     return value
-
-def update_pack(pack_id, **fields):
-    with database() as db:
-        db.execute(f"UPDATE packs SET {', '.join(key + '=?' for key in fields)} WHERE id=?", [*fields.values(), pack_id])
 
 def input_sticker(sticker):
     return {
@@ -226,17 +202,7 @@ async def sticker_file(pack_id: str, sticker_id: str, user=Depends(mini_app_user
         data, mime = await cached_media((user["id"], sticker["file_id"]), lambda: telegram.file(sticker["file_id"]))
     if sticker.get("is_video"):
         # H.264 preview works in iOS WebViews too; Telegram retains the original VP9 file.
-        async def preview():
-            async with _preview_processing:
-                try:
-                    output = await run_in_threadpool(make_video_preview, data)
-                    try:
-                        return output.read_bytes(), "video/mp4"
-                    finally:
-                        cleanup_files(output.parent)
-                except StickerConversionError as exc:
-                    raise HTTPException(422, "Не удалось подготовить предпросмотр видео") from exc
-        data, mime = await cached_media((user["id"], sticker["file_id"], "mp4"), preview)
+        data, mime = await video_preview(user["id"], sticker["file_id"], data)
     return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=60"})
 
 

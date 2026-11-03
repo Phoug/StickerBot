@@ -1,10 +1,7 @@
 import aiohttp
 import asyncio
-import shutil
 import tempfile
 import time
-import uuid
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -13,11 +10,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
 from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
-from backend.services.file_service import cleanup_files
-from backend.services.media.sticker_preview import make_video_preview
+from backend.services.media.sticker_preview import video_preview
 
-from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL, CLEANUP_INTERVAL
-from backend.routers.stickers import telegram, update_pack, user_operation, find_sticker
+from backend.config import MAX_SOURCE_SIZE
+from backend.services.media_store import register, owned_media, cleanup_expired
+from backend.services.bot_api import telegram
+from backend.services.publication import publish_render, user_operation, find_sticker
 from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
 from backend.services.media.sticker_converter import StickerConversionError
@@ -28,9 +26,6 @@ from backend.storage import database, owned_pack
 from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
 
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
-logger = logging.getLogger(__name__)
-cleanup_last_success = 0.0
-cleanup_last_error = False
 _edit_sources = {}
 _link_sources = {}
 
@@ -65,48 +60,6 @@ class Publish(BaseModel):
         if not is_emoji(value):
             raise ValueError("Введите один эмодзи")
         return value
-
-def cleanup_expired():
-    global cleanup_last_success, cleanup_last_error
-    with database() as db:
-        rows = db.execute("SELECT id,path FROM media WHERE created_at<?", (time.time() - SOURCE_TTL,)).fetchall()
-        for row in rows:
-            Path(row["path"]).unlink(missing_ok=True)
-            Path(row["path"]).with_suffix(".original.webm").unlink(missing_ok=True)
-            db.execute("DELETE FROM media WHERE id=?", (row["id"],))
-    cleanup_last_success = time.time()
-    cleanup_last_error = False
-
-
-async def maintain_media():
-    global cleanup_last_error
-    while True:
-        await asyncio.sleep(CLEANUP_INTERVAL)
-        try:
-            await run_in_threadpool(cleanup_expired)
-        except Exception:
-            cleanup_last_error = True
-            logger.exception("Media cleanup failed; retrying at the next interval")
-
-def register(path, user_id, kind, duration):
-    media_id = uuid.uuid4().hex
-    folder = DATA_DIR / "media"
-    folder.mkdir(parents=True, exist_ok=True)
-    destination = folder / (media_id + path.suffix)
-    shutil.move(str(path), destination)
-    with database() as db:
-        db.execute("INSERT INTO media(id,user_id,path,kind,created_at,duration) VALUES (?,?,?,?,?,?)",
-                   (media_id, user_id, str(destination), kind, time.time(), duration))
-    return {"id": media_id, "duration": duration}
-
-def owned_media(media_id, user_id, kind=None):
-    with database() as db:
-        row = db.execute("SELECT * FROM media WHERE id=? AND user_id=?", (media_id, user_id)).fetchone()
-    if not row or row["created_at"] < time.time() - SOURCE_TTL or not Path(row["path"]).is_file():
-        raise HTTPException(404, "Файл не найден или истёк срок хранения. Загрузите его заново.")
-    if kind and row["kind"] != kind:
-        raise HTTPException(422, "Некорректный тип файла")
-    return dict(row)
 
 def prepare(source, folder, user_id, photo=False):
     if photo:
@@ -232,17 +185,9 @@ async def get_media(media_id: str, preview: bool = False, thumbnail: bool = Fals
         data, mime = await cached_media((user["id"], media_id, "thumbnail"), photo_thumbnail)
         return Response(data, media_type=mime, headers={"Cache-Control":"private, no-store"})
     if preview and media["kind"] == "render":
-        async def preview_bytes():
-            async with _processing:
-                try:
-                    output = await run_in_threadpool(make_video_preview, Path(media["path"]).read_bytes())
-                    try:
-                        return output.read_bytes(), "video/mp4"
-                    finally:
-                        cleanup_files(output.parent)
-                except StickerConversionError as exc:
-                    raise HTTPException(422, "Не удалось подготовить предпросмотр") from exc
-        data, mime = await cached_media((user["id"], media_id, "render-preview"), preview_bytes)
+        data, mime = await video_preview(
+            user["id"], media_id, Path(media["path"]).read_bytes(),
+        )
         return Response(data, media_type=mime, headers={"Cache-Control": "private, no-store"})
     mime = {"source": "video/mp4", "photo": "image/png", "render_photo": "image/webp", "render": "video/webm"}[media["kind"]]
     return FileResponse(media["path"], media_type=mime,
@@ -261,59 +206,27 @@ async def render_sticker(payload: Edit, user=Depends(mini_app_user)):
                 if photo:
                     await run_in_threadpool(render_photo, source["path"], output, payload.shape, payload.zoom, payload.x, payload.y)
                 else:
-                    original = Path(source["path"]).with_suffix(".original.webm")
-                    render_source = original if original.is_file() else source["path"]
+                    render_source = source["render_path"]
                     await run_in_threadpool(render, render_source, output, payload.start, payload.end, payload.shape, payload.zoom, payload.x, payload.y)
                 return {**register(output, user["id"], "render_photo" if photo else "render", 0 if photo else payload.end - payload.start), "kind": "photo" if photo else "video"}
             except StickerConversionError as exc:
                 raise HTTPException(422, str(exc)) from exc
 
 @router.post("/packs/{pack_id}/publish")
-async def publish(pack_id: str, payload: Publish, user=Depends(mini_app_user)):
+async def publish(
+    pack_id: str, payload: Publish, user: dict = Depends(mini_app_user),
+) -> dict:
     async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         media = owned_media(payload.render_id, user["id"])
-        if media["kind"] not in {"render", "render_photo"}:
-            raise HTTPException(422, "Сначала создайте стикер в редакторе")
-        if media["published_pack"]:
-            if media["published_pack"] == pack_id:
-                return owned_pack(pack_id, user["id"])
-            raise HTTPException(409, "Этот стикер уже сохранён в другом наборе")
-        if pack["status"] == "import_pending":
-            raise HTTPException(409, "Сначала завершите импорт набора")
-        uploaded = await telegram.upload(user["id"], Path(media["path"]))
-        sticker = {"sticker": uploaded["file_id"], "format": "static" if media["kind"] == "render_photo" else "video", "emoji_list": [payload.emoji]}
-        # Recover a createNewStickerSet response lost after Telegram accepted it.
-        try:
-            actual = await telegram.call("getStickerSet", name=pack["name"])
-        except HTTPException as exc:
-            if "STICKERSET_INVALID" not in str(exc.detail):
-                raise
-            actual = None
-        if actual:
-            already_added = any(s["file_unique_id"] == uploaded["file_unique_id"] for s in actual["stickers"])
-            if not already_added:
-                if payload.replace_id:
-                    old = find_sticker(actual, payload.replace_id)
-                    await telegram.call("replaceStickerInSet", user_id=user["id"], name=pack["name"], old_sticker=old["file_id"], sticker=sticker)
-                elif len(actual["stickers"]) >= 120:
-                    raise HTTPException(422, "В наборе уже 120 стикеров")
-                else:
-                    await telegram.call("addStickerToSet", user_id=user["id"], name=pack["name"], sticker=sticker)
-        else:
-            if payload.replace_id:
-                raise HTTPException(409, "Набор изменился. Откройте его заново.")
-            await telegram.call("createNewStickerSet", user_id=user["id"], name=pack["name"], title=pack["title"], stickers=[sticker])
-        actual = await telegram.call("getStickerSet", name=pack["name"])
-        update_pack(pack_id, status="ready", count=len(actual["stickers"]), error=None)
-        with database() as db:
-            db.execute("UPDATE media SET published_pack=? WHERE id=?", (pack_id, payload.render_id))
-        return owned_pack(pack_id, user["id"])
+        return await publish_render(pack, media, payload.emoji, payload.replace_id, telegram)
 
 
 @router.post("/packs/{pack_id}/stickers/{sticker_id}/edit", status_code=201)
-async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_user)):
-    async with user_operation(user["id"]), _processing:
+async def edit_existing(
+    pack_id: str, sticker_id: str, user: dict = Depends(mini_app_user),
+) -> dict:
+    async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         actual = await telegram.call("getStickerSet", name=pack["name"])
         sticker = find_sticker(actual, sticker_id)
@@ -333,26 +246,19 @@ async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_use
             source.write_bytes(data)
             try:
                 if not sticker.get("is_video"):
-                    result = await run_in_threadpool(prepare, source, folder, user["id"], True)
+                    async with _processing:
+                        result = await run_in_threadpool(prepare, source, folder, user["id"], True)
                     if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
                     _edit_sources[cache_key] = result
                     return result
                 # Use a composited H.264 copy in the browser and retain the
                 # original VP9 with alpha for rendering. Both expire together.
-                async def preview_bytes():
-                    preview = await run_in_threadpool(make_video_preview, data)
-                    try:
-                        return preview.read_bytes(), "video/mp4"
-                    finally:
-                        cleanup_files(preview.parent)
-                # Share the immutable MP4 already used by the sticker viewer.
-                preview_data, _ = await cached_media((user["id"],sticker["file_id"],"mp4"),preview_bytes)
+                preview_data, _ = await video_preview(user["id"], sticker["file_id"], data)
                 preview = Path(folder)/"preview.mp4"
                 preview.write_bytes(preview_data)
-                duration = (await run_in_threadpool(probe, preview))[0]
-                result = register(preview,user["id"],"source",duration)
-                registered = owned_media(result["id"], user["id"])
-                shutil.copyfile(source, Path(registered["path"]).with_suffix(".original.webm"))
+                async with _processing:
+                    duration = (await run_in_threadpool(probe, preview))[0]
+                result = register(preview, user["id"], "source", duration, original=source)
                 result = {**result, "kind": "video"}
                 if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
                 _edit_sources[cache_key] = result

@@ -18,20 +18,26 @@ Telegram Mini App для создания стикерпаков, фото- и �
 
 Импорт поддерживает обычные наборы до 120 стикеров, включая статические, TGS и видео. Новые стикеры создаются из видео и фото JPEG/PNG/WebP. Статические и видеостикеры импортированной копии можно открыть в редакторе и заменить на прежнем месте; Прозрачность оригинального видеостикера сохраняется при повторной обработке. TGS-редактор не поддерживается. Маски и custom emoji не импортируются. Незавершённый импорт можно продолжить с экрана набора. Авторство внешнего набора автоматически не проверяется.
 
-## Структура
+## Structure
 
-- `app/bot/` — aiogram, команды и кнопка открытия Mini App; прежние команды загрузки и конвертации сохранены.
-- `frontend/` — React + TypeScript + Vite; страницы и редактор в компонентах, общий слой API и медиакэша.
-- `app/webapp/` — результат `npm run build`, не хранится в Git. FastAPI раздаёт его на `/app/`.
-- `backend/routers/stickers.py` — наборы, импорт, превью из Telegram.
-- `backend/routers/studio.py` — загрузка, обработка, предпросмотр, публикация.
-- `backend/services/media/` — yt-dlp и FFmpeg.
-- `backend/storage.py` — SQLite, привязка наборов и файлов к Telegram user ID.
-- `data/` — приватная база и временные медиа; не доступны через static и не коммитятся.
-- `common/` — JSON-логирование и корреляция запросов API и бота.
-- `backend/backup.py` — проверенные снимки SQLite и восстановление без доступа к секретам.
-- `docs/operations.md` — ограничения ресурсов, мониторинг, резервные копии и восстановление.
-- `flake.nix`, `flake.lock` — закреплённые инструменты разработки; Python-библиотеки фиксируются в `requirements.lock` и `tests/requirements.lock`.
+- `app/bot/` — Telegram polling, commands, localization and the Mini App button.
+- `frontend/src/app/` — application navigation and shared task status.
+- `frontend/src/packs/` — pack creation, ordering, viewing and deletion.
+- `frontend/src/studio/` — source selection, editor, render and publication flow.
+- `frontend/src/media/`, `frontend/src/telegram/` — playback and Mini App integration.
+- `app/webapp/` — generated frontend build, served at `/app/`; excluded from Git.
+- `backend/routers/` — authenticated HTTP entrypoints and validation.
+- `backend/services/` — publication reconciliation, media lifecycle and processing.
+- `backend/storage.py` — SQLite schema and ownership; `backend/backup.py` — snapshots and recovery.
+- `common/` — shared JSON logging and request correlation.
+- `tests/` — Python scenarios; shared client fixture in `conftest.py`, Telegram adapter in `support.py`.
+- `data/` — private runtime database and temporary media; excluded from Git and static hosting.
+- `docs/architecture.md` — module ownership, dependency directions and where to add changes.
+- `docs/operations.md` — environment setup, verification, resource limits and recovery.
+
+See the [architecture map](docs/architecture.md) before changing module ownership.
+Development tools are pinned in `flake.nix` and `flake.lock`; Python dependency
+sets are pinned in `requirements.lock` and `tests/requirements.lock`.
 
 ## Локальный запуск
 

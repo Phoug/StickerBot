@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from backend.config import DATA_DIR
 from backend.maintenance import DATABASE_NAME
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 @contextmanager
 def database():
@@ -36,6 +36,9 @@ def initialize():
                 published_pack TEXT
             );
         """)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(media)")}
+        if "published_replace_id" not in columns:
+            db.execute("ALTER TABLE media ADD COLUMN published_replace_id TEXT")
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
 def owned_pack(pack_id, user_id):
