@@ -1,10 +1,7 @@
 import aiohttp
 import asyncio
-import shutil
 import tempfile
 import time
-import uuid
-import logging
 from pathlib import Path
 from typing import Literal
 
@@ -15,7 +12,8 @@ from emoji import is_emoji
 from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
 from backend.services.media.sticker_preview import video_preview
 
-from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL, CLEANUP_INTERVAL
+from backend.config import MAX_SOURCE_SIZE
+from backend.services.media_store import register, owned_media, cleanup_expired
 from backend.services.bot_api import telegram
 from backend.services.publication import publish_render, user_operation, find_sticker
 from backend.security import mini_app_user
@@ -28,9 +26,6 @@ from backend.storage import database, owned_pack
 from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
 
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
-logger = logging.getLogger(__name__)
-cleanup_last_success = 0.0
-cleanup_last_error = False
 _edit_sources = {}
 _link_sources = {}
 
@@ -65,48 +60,6 @@ class Publish(BaseModel):
         if not is_emoji(value):
             raise ValueError("Введите один эмодзи")
         return value
-
-def cleanup_expired():
-    global cleanup_last_success, cleanup_last_error
-    with database() as db:
-        rows = db.execute("SELECT id,path FROM media WHERE created_at<?", (time.time() - SOURCE_TTL,)).fetchall()
-        for row in rows:
-            Path(row["path"]).unlink(missing_ok=True)
-            Path(row["path"]).with_suffix(".original.webm").unlink(missing_ok=True)
-            db.execute("DELETE FROM media WHERE id=?", (row["id"],))
-    cleanup_last_success = time.time()
-    cleanup_last_error = False
-
-
-async def maintain_media():
-    global cleanup_last_error
-    while True:
-        await asyncio.sleep(CLEANUP_INTERVAL)
-        try:
-            await run_in_threadpool(cleanup_expired)
-        except Exception:
-            cleanup_last_error = True
-            logger.exception("Media cleanup failed; retrying at the next interval")
-
-def register(path, user_id, kind, duration):
-    media_id = uuid.uuid4().hex
-    folder = DATA_DIR / "media"
-    folder.mkdir(parents=True, exist_ok=True)
-    destination = folder / (media_id + path.suffix)
-    shutil.move(str(path), destination)
-    with database() as db:
-        db.execute("INSERT INTO media(id,user_id,path,kind,created_at,duration) VALUES (?,?,?,?,?,?)",
-                   (media_id, user_id, str(destination), kind, time.time(), duration))
-    return {"id": media_id, "duration": duration}
-
-def owned_media(media_id, user_id, kind=None):
-    with database() as db:
-        row = db.execute("SELECT * FROM media WHERE id=? AND user_id=?", (media_id, user_id)).fetchone()
-    if not row or row["created_at"] < time.time() - SOURCE_TTL or not Path(row["path"]).is_file():
-        raise HTTPException(404, "Файл не найден или истёк срок хранения. Загрузите его заново.")
-    if kind and row["kind"] != kind:
-        raise HTTPException(422, "Некорректный тип файла")
-    return dict(row)
 
 def prepare(source, folder, user_id, photo=False):
     if photo:
@@ -253,15 +206,16 @@ async def render_sticker(payload: Edit, user=Depends(mini_app_user)):
                 if photo:
                     await run_in_threadpool(render_photo, source["path"], output, payload.shape, payload.zoom, payload.x, payload.y)
                 else:
-                    original = Path(source["path"]).with_suffix(".original.webm")
-                    render_source = original if original.is_file() else source["path"]
+                    render_source = source["render_path"]
                     await run_in_threadpool(render, render_source, output, payload.start, payload.end, payload.shape, payload.zoom, payload.x, payload.y)
                 return {**register(output, user["id"], "render_photo" if photo else "render", 0 if photo else payload.end - payload.start), "kind": "photo" if photo else "video"}
             except StickerConversionError as exc:
                 raise HTTPException(422, str(exc)) from exc
 
 @router.post("/packs/{pack_id}/publish")
-async def publish(pack_id: str, payload: Publish, user=Depends(mini_app_user)):
+async def publish(
+    pack_id: str, payload: Publish, user: dict = Depends(mini_app_user),
+) -> dict:
     async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         media = owned_media(payload.render_id, user["id"])
@@ -269,7 +223,9 @@ async def publish(pack_id: str, payload: Publish, user=Depends(mini_app_user)):
 
 
 @router.post("/packs/{pack_id}/stickers/{sticker_id}/edit", status_code=201)
-async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_user)):
+async def edit_existing(
+    pack_id: str, sticker_id: str, user: dict = Depends(mini_app_user),
+) -> dict:
     async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         actual = await telegram.call("getStickerSet", name=pack["name"])
@@ -302,9 +258,7 @@ async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_use
                 preview.write_bytes(preview_data)
                 async with _processing:
                     duration = (await run_in_threadpool(probe, preview))[0]
-                result = register(preview,user["id"],"source",duration)
-                registered = owned_media(result["id"], user["id"])
-                shutil.copyfile(source, Path(registered["path"]).with_suffix(".original.webm"))
+                result = register(preview, user["id"], "source", duration, original=source)
                 result = {**result, "kind": "video"}
                 if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
                 _edit_sources[cache_key] = result

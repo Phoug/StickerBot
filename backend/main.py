@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.routers import media, stickers, system, studio
 from backend import storage
+from backend.services import media_store
 from backend.config import BOT_TOKEN, API_SECRET_TOKEN
 from backend.maintenance import exclusive_access
 from backend.observability import RuntimeMiddleware
@@ -23,8 +24,8 @@ logger = logging.getLogger("video_backend")
 async def lifespan(application: FastAPI):
     with exclusive_access(storage.DATA_DIR):
         storage.initialize()
-        await run_blocking(studio.cleanup_expired)
-        cleanup_task = asyncio.create_task(studio.maintain_media())
+        await run_blocking(media_store.cleanup_expired)
+        cleanup_task = asyncio.create_task(media_store.maintain_media())
         logger.info("Backend started; Mini App authentication enabled")
         try:
             yield

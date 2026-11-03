@@ -16,12 +16,12 @@ def health() -> dict:
 
 @router.get("/ready")
 def ready() -> dict:
-    from backend.routers import studio
+    from backend.services import media_store
     try:
         check_ready()
     except (OSError, sqlite3.Error):
         raise HTTPException(503, "Storage is not ready") from None
-    if studio.cleanup_last_error or time.time() - studio.cleanup_last_success > CLEANUP_INTERVAL * 3:
+    if media_store.cleanup_last_error or time.time() - media_store.cleanup_last_success > CLEANUP_INTERVAL * 3:
         raise HTTPException(503, "Media maintenance is not ready")
     return {"ok": True, "service": "video-extractor"}
 

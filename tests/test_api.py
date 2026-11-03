@@ -103,7 +103,6 @@ class FakeTelegram:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(storage, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(studio, "DATA_DIR", tmp_path)
     from backend.services.media.preview_cache import _items
     _items.clear()
     studio._link_sources.clear()
