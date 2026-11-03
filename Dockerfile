@@ -39,7 +39,10 @@ USER 65532:65532
 CMD ["python3", "run_bot.py"]
 
 FROM ${PYTHON_IMAGE} AS runtime
+# DHI dev images can omit init helpers required by Debian package postinsts.
+# Reinstall also restores helpers when dpkg already records the package.
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends --reinstall init-system-helpers \
     && apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
