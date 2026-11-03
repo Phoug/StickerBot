@@ -13,8 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
 from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
-from backend.services.file_service import cleanup_files
-from backend.services.media.sticker_preview import make_video_preview
+from backend.services.media.sticker_preview import video_preview
 
 from backend.config import DATA_DIR, MAX_SOURCE_SIZE, SOURCE_TTL, CLEANUP_INTERVAL
 from backend.routers.stickers import telegram, update_pack, user_operation, find_sticker
@@ -232,17 +231,9 @@ async def get_media(media_id: str, preview: bool = False, thumbnail: bool = Fals
         data, mime = await cached_media((user["id"], media_id, "thumbnail"), photo_thumbnail)
         return Response(data, media_type=mime, headers={"Cache-Control":"private, no-store"})
     if preview and media["kind"] == "render":
-        async def preview_bytes():
-            async with _processing:
-                try:
-                    output = await run_in_threadpool(make_video_preview, Path(media["path"]).read_bytes())
-                    try:
-                        return output.read_bytes(), "video/mp4"
-                    finally:
-                        cleanup_files(output.parent)
-                except StickerConversionError as exc:
-                    raise HTTPException(422, "Не удалось подготовить предпросмотр") from exc
-        data, mime = await cached_media((user["id"], media_id, "render-preview"), preview_bytes)
+        data, mime = await video_preview(
+            user["id"], media_id, Path(media["path"]).read_bytes(),
+        )
         return Response(data, media_type=mime, headers={"Cache-Control": "private, no-store"})
     mime = {"source": "video/mp4", "photo": "image/png", "render_photo": "image/webp", "render": "video/webm"}[media["kind"]]
     return FileResponse(media["path"], media_type=mime,
@@ -313,7 +304,7 @@ async def publish(pack_id: str, payload: Publish, user=Depends(mini_app_user)):
 
 @router.post("/packs/{pack_id}/stickers/{sticker_id}/edit", status_code=201)
 async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_user)):
-    async with user_operation(user["id"]), _processing:
+    async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         actual = await telegram.call("getStickerSet", name=pack["name"])
         sticker = find_sticker(actual, sticker_id)
@@ -333,23 +324,18 @@ async def edit_existing(pack_id: str, sticker_id: str, user=Depends(mini_app_use
             source.write_bytes(data)
             try:
                 if not sticker.get("is_video"):
-                    result = await run_in_threadpool(prepare, source, folder, user["id"], True)
+                    async with _processing:
+                        result = await run_in_threadpool(prepare, source, folder, user["id"], True)
                     if len(_edit_sources)>=128: _edit_sources.pop(next(iter(_edit_sources)))
                     _edit_sources[cache_key] = result
                     return result
                 # Use a composited H.264 copy in the browser and retain the
                 # original VP9 with alpha for rendering. Both expire together.
-                async def preview_bytes():
-                    preview = await run_in_threadpool(make_video_preview, data)
-                    try:
-                        return preview.read_bytes(), "video/mp4"
-                    finally:
-                        cleanup_files(preview.parent)
-                # Share the immutable MP4 already used by the sticker viewer.
-                preview_data, _ = await cached_media((user["id"],sticker["file_id"],"mp4"),preview_bytes)
+                preview_data, _ = await video_preview(user["id"], sticker["file_id"], data)
                 preview = Path(folder)/"preview.mp4"
                 preview.write_bytes(preview_data)
-                duration = (await run_in_threadpool(probe, preview))[0]
+                async with _processing:
+                    duration = (await run_in_threadpool(probe, preview))[0]
                 result = register(preview,user["id"],"source",duration)
                 registered = owned_media(result["id"], user["id"])
                 shutil.copyfile(source, Path(registered["path"]).with_suffix(".original.webm"))

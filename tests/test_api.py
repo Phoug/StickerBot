@@ -11,6 +11,7 @@ from backend.config import BOT_TOKEN
 from backend.main import app
 from backend import storage
 from backend.routers import studio, stickers
+from backend.services.media import sticker_preview
 
 def auth(user_id=7):
     data = {"auth_date": str(int(time.time())), "user": json.dumps({"id": user_id, "first_name": "Test"})}
@@ -333,7 +334,7 @@ def test_render_preview_is_private_mp4_and_cleans_up(client, monkeypatch, tmp_pa
     preview_folder.mkdir()
     output = preview_folder / "preview.mp4"
     output.write_bytes(b"mp4")
-    monkeypatch.setattr(studio, "make_video_preview", lambda data: output)
+    monkeypatch.setattr(sticker_preview, "make_video_preview", lambda data: output)
     route = "/api/studio/media/"+media["id"]+"?preview=true"
     assert api.get(route, headers=auth(8)).status_code == 404
     response = api.get(route, headers=auth())
@@ -436,7 +437,7 @@ def test_video_edit_retains_private_original_until_expiry(client, monkeypatch):
     preview_folder=folder/"temporary-preview"
     preview_folder.mkdir()
     preview=preview_folder/"preview.mp4";preview.write_bytes(b"browser-preview")
-    monkeypatch.setattr(studio,"make_video_preview",lambda data: preview)
+    monkeypatch.setattr(sticker_preview,"make_video_preview",lambda data: preview)
     monkeypatch.setattr(studio,"probe",lambda path: (1,512,288))
     response=api.post(f"/api/studio/packs/{pack['id']}/stickers/id-1/edit",headers=auth())
     assert response.status_code == 201
@@ -467,10 +468,7 @@ def test_viewer_and_editor_share_preview_and_reopening_editor_reuses_source(clie
         temp = folder/'shared-preview';temp.mkdir()
         output = temp/'preview.mp4';output.write_bytes(b'mp4-preview')
         return output
-    monkeypatch.setattr(stickers,'make_video_preview',preview)
-    def forbidden(data):
-        raise AssertionError('Editor must reuse the viewer MP4')
-    monkeypatch.setattr(studio,'make_video_preview',forbidden)
+    monkeypatch.setattr(sticker_preview, 'make_video_preview', preview)
     monkeypatch.setattr(studio,'probe',lambda path: (1,512,288))
     root=f'/api/packs/{pack["id"]}/stickers/id-1'
     assert api.get(root+'/file',headers=auth()).content==b'mp4-preview'
