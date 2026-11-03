@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { mediaURL } from "./api";
-import { Icon, ImageAsset } from "./ui";
+import { mediaURL } from "../api";
+import { Icon, ImageAsset } from "../ui";
 export function Playback({
   path,
   video,

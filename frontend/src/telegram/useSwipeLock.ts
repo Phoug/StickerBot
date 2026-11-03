@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { tg } from "./api";
+import { tg } from "../api";
 let locks = 0;
 export function useSwipeLock(enabled: boolean) {
   useEffect(() => {

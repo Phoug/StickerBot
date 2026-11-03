@@ -1,8 +1,8 @@
-import { useSwipeLock } from "./useSwipeLock";
+import { useSwipeLock } from "../telegram/useSwipeLock";
 import { useEffect, useRef, useState, type PointerEvent as PE } from "react";
-import type { Edit, Media } from "./types";
-import { mediaURL } from "./api";
-import { Icon } from "./ui";
+import type { Edit, Media } from "../types";
+import { mediaURL } from "../api";
+import { Icon } from "../ui";
 export const clamp = (n: number, min = 0, max = 1) =>
   Math.max(min, Math.min(max, n));
 export function trim(

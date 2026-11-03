@@ -72,3 +72,13 @@ declare global {
     Telegram?: { WebApp: Telegram };
   }
 }
+
+export interface TaskRunner {
+  run: (label: string, work: () => Promise<void>) => Promise<void>;
+  isRunning: () => boolean;
+  reportError: (message: string) => void;
+}
+
+export interface ScreenHandle {
+  back: () => void;
+}
