@@ -4,6 +4,7 @@
 **/.classpath
 **/.dockerignore
 **/.env
+**/.env.*
 **/.git
 **/.gitignore
 **/.project
@@ -26,3 +27,13 @@
 **/values.dev.yaml
 LICENSE
 README.md
+**/*.session
+**/*.session-journal
+data
+tests
+
+app/webapp
+test-results
+backups
+.cache
+.direnv

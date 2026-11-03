@@ -1,7 +1,6 @@
 from typing import Any
 
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import DownloadError
+from backend.services.media.ytdlp import extract
 
 
 class ExtractError(Exception):
@@ -22,10 +21,7 @@ YDL_BASE_OPTIONS: dict[str, Any] = {
 
 def _extract_info(url: str) -> dict:
     try:
-        with YoutubeDL(YDL_BASE_OPTIONS) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except DownloadError as exc:
-        raise ExtractError(str(exc)) from exc
+        info = extract(url, YDL_BASE_OPTIONS)
     except Exception as exc:
         raise ExtractError(f"Unexpected error: {exc}") from exc
 
@@ -44,10 +40,6 @@ def _extract_info(url: str) -> dict:
 def _normalize_format(fmt: dict) -> dict:
     video_codec = fmt.get("vcodec")
     audio_codec = fmt.get("acodec")
-
-    has_video = video_codec not in (None, "none")
-    has_audio = audio_codec not in (None, "none")
-
     return {
         "format_id": str(fmt.get("format_id")),
         "ext": fmt.get("ext"),
@@ -64,39 +56,27 @@ def _normalize_format(fmt: dict) -> dict:
         "vbr": fmt.get("vbr"),
         "protocol": fmt.get("protocol"),
         "url": fmt.get("url"),
-        "has_audio": has_audio,
-        "has_video": has_video,
+        "has_audio": audio_codec not in (None, "none"),
+        "has_video": video_codec not in (None, "none"),
     }
 
 
-def _extract_formats(
-    info: dict,
-    only_with_video: bool = True,
-) -> list[dict]:
+def _extract_formats(info: dict, only_with_video: bool = True) -> list[dict]:
     formats: list[dict] = []
-
     for fmt in info.get("formats") or []:
         if not fmt.get("format_id") or not fmt.get("url"):
             continue
-
         has_video = fmt.get("vcodec") not in (None, "none")
-
         if only_with_video and not has_video:
             continue
-
         formats.append(_normalize_format(fmt))
-
     formats.reverse()
     return formats
 
 
-def get_video_info(
-    url: str,
-    only_with_video: bool = True,
-) -> dict:
+def get_video_info(url: str, only_with_video: bool = True) -> dict:
     info = _extract_info(url)
     formats = _extract_formats(info, only_with_video=only_with_video)
-
     return {
         "source_url": url,
         "id": info.get("id"),

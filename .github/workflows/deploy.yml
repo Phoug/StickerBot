@@ -17,8 +17,14 @@ permissions:
   contents: read
 
 jobs:
+  checks:
+    uses: ./.github/workflows/test.yml
+    with:
+      skip_image: true
+
   build:
     name: Build and push
+    needs: checks
     runs-on: ubuntu-latest
 
     outputs:
@@ -27,11 +33,11 @@ jobs:
     steps:
       # Копирование репозитория в раннер
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       
       # Раннеру нужен логин в DHI для подгрузки образа
       - name: Login to DHI
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: dhi.io
           username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -39,7 +45,7 @@ jobs:
 
       # Для последующего пуша
       - name: Login to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: docker.io
           username: ${{ vars.DOCKERHUB_USERNAME }}
@@ -47,11 +53,11 @@ jobs:
 
       # Для сборки образа
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Generate image metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.IMAGE_NAME }}
           flavor: |
@@ -73,10 +79,11 @@ jobs:
       # Кидаем образ на докерхаб
       - name: Build and push image
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: ./Dockerfile
+          build-args: APP_VERSION=${{ github.sha }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -85,6 +92,9 @@ jobs:
           # Кэш BuildKit между запусками Actions
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify published image
+        run: python3 scripts/check_image.py "${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}"
 
   # Непосредственно деплой на сервер
   deploy:
