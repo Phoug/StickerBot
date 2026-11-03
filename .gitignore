@@ -15,3 +15,5 @@ test-results/
 backups/
 .cache/
 .direnv/
+
+.agents
