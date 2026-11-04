@@ -92,7 +92,7 @@ services:
     healthcheck:
       test: ["CMD", "python3", "-m", "backend.backup", "health"]
       interval: 5m
-      timeout: 5s
+      timeout: 20s
       start_period: 30s
       retries: 2
     depends_on:
