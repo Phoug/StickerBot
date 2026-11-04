@@ -815,12 +815,8 @@ body.editing {
   color: #39a8df;
 }
 .tool-content {
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  min-height: 0;
-  flex: 1;
-  scrollbar-width: thin;
-  scrollbar-color: #505050 transparent;
+  min-width: 0;
+  flex: 0 0 auto;
 }
 .tool-panel {
   padding: 14px 16px 16px;
@@ -1483,7 +1479,6 @@ body.viewing {
   cursor: grabbing;
 }
 .screen:not(.hidden),
-.tool-panel:not(.hidden),
 dialog[open] {
   animation: appear 0.22s ease-out;
 }
@@ -2303,7 +2298,7 @@ label {
 #editor .editor-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(100px, 1fr) 210px;
+  grid-template-rows: minmax(0, 1fr) max-content;
 }
 #editor .editor-view {
   display: flex;
@@ -2326,7 +2321,15 @@ label {
 }
 #editor .editor-tools {
   min-width: 0;
+  min-height: max-content;
   margin: 0;
+}
+#editor .shapes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#editor .shapes button {
+  overflow-wrap: anywhere;
 }
 #editor .editor-heading {
   height: 38px;
@@ -2343,13 +2346,44 @@ label {
     grid-template-rows: minmax(100px, 1fr);
   }
 }
-@media (max-height: 650px) and (max-width: 719px) {
-  #editor {
-    overflow-y: auto;
+
+@media (max-height: 500px) {
+  .is-editor .topbar {
+    display: none;
   }
-  #editor .editor-layout {
-    flex-shrink: 0;
-    min-height: 310px;
-    grid-template-rows: minmax(130px, 1fr) 170px;
+  #editor .editor-heading {
+    height: 30px;
+  }
+  #editor .tool-panel {
+    padding: 6px 12px;
+  }
+  #editor .tool-tabs button {
+    height: 32px;
+  }
+  #editor .control-heading .text-button {
+    min-height: 32px;
+    padding: 4px 6px;
+  }
+  #editor .filmstrip {
+    height: 40px;
+    margin-top: 8px;
+  }
+  #editor .shapes {
+    margin-top: 8px;
+  }
+  #editor .shapes button {
+    min-height: 64px;
+    padding: 6px 3px;
+    gap: 4px;
+  }
+  #editor .hint {
+    margin: 6px 0 0;
+    line-height: 1.35;
+  }
+  #editor .editor-footer {
+    padding: 8px 0;
+  }
+  #editor .editor-footer .button {
+    min-height: 40px;
   }
 }

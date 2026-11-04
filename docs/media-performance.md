@@ -42,6 +42,18 @@ See [WebKit's video loading policy](https://webkit.org/blog/6784/new-video-polic
 This removes the full-download wait after preparation; it does not remove upload,
 download or HEVC transcoding time. No device latency measurements are claimed.
 
+## Editor controls
+
+The tool panel sizes to its content instead of a fixed-height scrolling area.
+Shape labels wrap within equal-width columns. Short viewports use compact
+controls and hide the app brand bar so the preview and action remain visible.
+Browser layout checks visit every tool tab at 320–1024 px widths, including
+landscape, and assert that text, buttons and panels fit without scrolling.
+
+`npm run test:layout` uses Chromium. To also check WebKit, install its browser
+and system dependencies with `npx playwright install --with-deps webkit`, then
+run `LAYOUT_BROWSER=webkit npm run test:layout` from `frontend/`.
+
 ## Cache inventory
 
 | Data | Scope and bounds | Revalidation |
