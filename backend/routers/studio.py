@@ -22,7 +22,7 @@ from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
 from backend.services.media.sticker_converter import StickerConversionError
 from backend.services.media.studio_renderer import normalize, render, probe
-from backend.services.media.photo_renderer import normalize_photo, render_photo
+from backend.services.media.photo_renderer import normalize_photo, render_photo, is_photo
 from backend.services.media.preview_cache import cached_media
 from backend.storage import database, owned_pack
 from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
@@ -30,6 +30,7 @@ from backend.services.media.photo_links import validate_url, resolve_tiktok, fet
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
 _edit_sources = {}
 _link_sources = {}
+_upload_sources: dict[tuple[int, str], dict] = {}
 
 def remember_link(key, result):
     if len(_link_sources)>=64: _link_sources.pop(next(iter(_link_sources)))
@@ -71,6 +72,7 @@ class Publish(BaseModel):
         return value
 
 def prepare(source: Path, folder: str | Path, user_id: int, photo: bool = False) -> dict:
+    photo = is_photo(source) or photo
     if photo:
         output = Path(folder) / "source.png"
         width, height = normalize_photo(source, output)
@@ -91,13 +93,30 @@ async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
             with tempfile.TemporaryDirectory(prefix="sticker_upload_") as folder:
                 source = Path(folder) / "upload"
                 size = 0
+                digest = hashlib.sha256()
                 with source.open("wb") as target:
                     while chunk := await video.read(1024 * 1024):
                         size += len(chunk)
                         if size > MAX_SOURCE_SIZE:
                             raise HTTPException(413, "Файл должен быть не больше 50 МБ")
+                        digest.update(chunk)
                         target.write(chunk)
-                return await run_in_threadpool(prepare, source, folder, user["id"], (video.content_type or "").startswith("image/"))
+                key = (user["id"], digest.hexdigest())
+                previous = _upload_sources.get(key)
+                if previous:
+                    try:
+                        owned_media(previous["id"], user["id"])
+                        return previous
+                    except HTTPException:
+                        _upload_sources.pop(key, None)
+                result = await run_in_threadpool(
+                    prepare, source, folder, user["id"],
+                    (video.content_type or "").startswith("image/"),
+                )
+                if len(_upload_sources) >= 64:
+                    _upload_sources.pop(next(iter(_upload_sources)))
+                _upload_sources[key] = result
+                return result
     except StickerConversionError as exc:
         raise HTTPException(422, str(exc)) from exc
     finally:
@@ -154,7 +173,12 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
                         raise
                     photos = []
             if not social:
-                photos = [payload.url.strip()]
+                data, _ = await fetch_public(payload.url.strip(), limit=MAX_SOURCE_SIZE)
+                with tempfile.TemporaryDirectory(prefix="sticker_direct_") as folder:
+                    source = Path(folder) / "download"
+                    source.write_bytes(data)
+                    result = await run_in_threadpool(prepare, source, folder, user["id"])
+                return remember_link(key, result)
             if photos:
                 results = []
                 total = 0

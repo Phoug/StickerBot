@@ -26,6 +26,7 @@ def client(
     _items.clear()
     studio._link_sources.clear()
     studio._edit_sources.clear()
+    studio._upload_sources.clear()
     fake = FakeTelegram()
     monkeypatch.setattr(stickers, "telegram", fake)
     monkeypatch.setattr(studio, "telegram", fake)
