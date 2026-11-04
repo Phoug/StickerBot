@@ -1,7 +1,7 @@
 import { useSwipeLock } from "../telegram/useSwipeLock";
-import { useEffect, useRef, useState, type PointerEvent as PE } from "react";
+import { useRef, useState, type CSSProperties, type PointerEvent as PE } from "react";
 import type { Edit, Media } from "../types";
-import { mediaURL } from "../api";
+import { useEditorMedia } from "./useEditorMedia";
 import { Icon } from "../ui";
 export const clamp = (n: number, min = 0, max = 1) =>
   Math.max(min, Math.min(max, n));
@@ -49,17 +49,15 @@ export function Editor({
   busy: boolean;
 }) {
   const photo = source.kind === "photo";
-  const [url, setURL] = useState(""),
-    [tool, setTool] = useState(photo ? "crop" : "trim"),
+  const { url, ready, failure, frames, retry, onReady, onError } = useEditorMedia(source);
+  const [tool, setTool] = useState(photo ? "crop" : "trim"),
     [size, setSize] = useState({
       w: source.width || 640,
       h: source.height || 360,
     }),
     [playing, setPlaying] = useState(false),
     [clock, setClock] = useState(0),
-    [span, setSpan] = useState(Math.min(12, source.duration || 1)),
-    [frames, setFrames] = useState<string[]>([]),
-    [failure, setFailure] = useState("");
+    [span, setSpan] = useState(Math.min(12, source.duration || 1));
   const video = useRef<HTMLVideoElement>(null),
     stage = useRef<HTMLDivElement>(null),
     points = useRef(new Map<number, { x: number; y: number }>()),
@@ -76,57 +74,7 @@ export function Editor({
       start: number;
       end: number;
     } | null>(null);
-  useEffect(() => {
-    let live = true;
-    void mediaURL("/api/studio/media/" + source.id).then(
-      (u) => {
-        if (live) setURL(u);
-      },
-      (e) => {
-        if (live) setFailure(e.message);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [source.id]);
   useSwipeLock(true);
-  useEffect(() => {
-    if (photo || !url) return;
-    let live = true;
-    const v = document.createElement("video");
-    v.muted = true;
-    v.playsInline = true;
-    const urls: string[] = [];
-    v.onloadedmetadata = async () => {
-      try {
-        for (let i = 0; i < 16 && live; i++) {
-          await new Promise<void>((resolve, reject) => {
-            v.onseeked = () => resolve();
-            v.onerror = reject;
-            v.currentTime = Math.min(
-              source.duration - 0.01,
-              ((i + 0.5) * source.duration) / 16,
-            );
-          });
-          if (!live) break;
-          const c = document.createElement("canvas");
-          c.width = 96;
-          c.height = 64;
-          c.getContext("2d")!.drawImage(v, 0, 0, 96, 64);
-          urls.push(c.toDataURL("image/jpeg", 0.6));
-          setFrames([...urls]);
-        }
-      } catch {}
-    };
-    v.src = url;
-    return () => {
-      live = false;
-      v.pause();
-      v.removeAttribute("src");
-      v.load();
-    };
-  }, [url, photo, source.duration]);
   const change = (patch: Partial<Edit>) => onChange({ ...edit, ...patch });
   const ratio = edit.shape === "original" ? size.w / size.h : 1;
   const { x: overflowX, y: overflowY } = cropOverflow(
@@ -216,24 +164,26 @@ export function Editor({
       </div>
       {failure && (
         <p className="notice" role="alert">
-          {failure}
+          {failure}{" "}
+          <button className="text-button" onClick={retry}>Повторить</button>
         </p>
       )}
       <div className="editor-layout">
         <div className="editor-view">
-          <div className="preview-surface">
+          <div className="preview-surface" aria-busy={!ready && !failure}>
+            {!ready && !failure && (
+              <span className="media-loading" role="status" aria-label="Загружаем файл для редактора">
+                <span className="spinner" />
+              </span>
+            )}
             <div
               id="crop-stage"
               ref={stage}
               className={"crop-stage " + edit.shape}
               style={{
+                "--crop-ratio": ratio,
                 aspectRatio: ratio,
-                height: "auto",
-                width:
-                  ratio < 1
-                    ? `min(calc(var(--content-height) * .29 * ${ratio}), 260px)`
-                    : undefined,
-              }}
+              } as CSSProperties}
               tabIndex={0}
               onKeyDown={(e) => {
                 const k = e.key;
@@ -263,17 +213,18 @@ export function Editor({
                   });
               }}
               aria-label="Кадр. Двигайте изображение и увеличивайте двумя пальцами"
-              onWheel={(e) =>
+              onWheel={(e) => {
+                if (busy || !ready) return;
                 change({
                   zoom: clamp(
                     edit.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08),
                     1,
                     3,
                   ),
-                })
-              }
+                });
+              }}
               onPointerDown={(e) => {
-                if (busy) return;
+                if (busy || !ready) return;
                 e.preventDefault();
                 video.current?.pause();
                 setTool("crop");
@@ -292,12 +243,14 @@ export function Editor({
                   src={url || undefined}
                   style={mediaStyle}
                   alt="Фото для стикера"
-                  onLoad={(e) =>
+                  onLoad={(e) => {
                     setSize({
                       w: e.currentTarget.naturalWidth,
                       h: e.currentTarget.naturalHeight,
-                    })
-                  }
+                    });
+                    onReady();
+                  }}
+                  onError={onError}
                 />
               ) : (
                 <video
@@ -314,6 +267,8 @@ export function Editor({
                     });
                     e.currentTarget.currentTime = edit.start;
                   }}
+                  onLoadedData={onReady}
+                  onError={onError}
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
                   onTimeUpdate={(e) => {
@@ -577,7 +532,7 @@ export function Editor({
         <button
           id="render"
           className="button wide"
-          disabled={busy || !url || !!failure}
+          disabled={busy || !ready || !!failure}
           onClick={onRender}
         >
           Посмотреть результат

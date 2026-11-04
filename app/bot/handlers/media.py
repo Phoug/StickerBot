@@ -37,8 +37,12 @@ async def document_handler(message: Message, tr):
 
 
 @router.message(F.text)
-async def url_handler(message: Message, tr):
-    url = extract_url(message.text or "")
+async def url_handler(message: Message, tr) -> None:
+    url = next(
+        (entity.url for entity in message.entities or []
+         if entity.type == "text_link" and entity.url),
+        None,
+    ) or extract_url(message.text or "")
     if not url:
         await message.answer(tr("invalid_url"))
         return

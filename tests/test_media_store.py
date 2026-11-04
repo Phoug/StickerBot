@@ -36,3 +36,21 @@ def test_failed_registration_removes_untracked_file(
     assert list((tmp_path / "media").iterdir()) == []
     with storage.database() as db:
         assert db.execute("SELECT count(*) FROM media").fetchone()[0] == 0
+
+
+def test_editor_preview_retains_uploaded_original_and_expires_both(client) -> None:
+    _, _, folder = client
+    source = folder / "upload"
+    source.write_bytes(b"full-resolution original")
+    preview = folder / "source.mp4"
+    preview.write_bytes(b"lightweight preview")
+    registered = media_store.register(preview, 7, "source", 1, original=source)
+    owned = media_store.owned_media(registered["id"], 7)
+    original = owned["render_path"]
+    assert original.read_bytes() == b"full-resolution original"
+    assert Path(owned["path"]).read_bytes() == b"lightweight preview"
+    with storage.database() as db:
+        db.execute("UPDATE media SET created_at=0 WHERE id=?", (registered["id"],))
+    media_store.cleanup_expired()
+    assert not original.exists()
+    assert not Path(owned["path"]).exists()

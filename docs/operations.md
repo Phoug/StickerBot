@@ -28,6 +28,35 @@ npm ci --no-audit --no-fund
 
 В тестах всегда используется `PYTHON_DOTENV_DISABLED=1` и фиктивные токены.
 
+## Editor Preview and browser layout checks
+
+Video Sources retain the uploaded/downloaded original for Render. The editor uses
+an H.264 Preview of at most 720 pixels on its longest side and 30 frames per
+second. Compatible small H.264 files are remuxed without re-encoding. Preview and
+original expire together; allow disk space for both (up to 100 MB per Source).
+Existing Sources without a retained original continue rendering from their
+stored file. No database migration is required.
+
+Photo Sources use a cached WebP Preview up to 1280 pixels; Render still reads
+the normalized, lossless photo. The editor waits for the first decoded frame
+before generating its filmstrip.
+Network and decoding failures expose a retry action. Filmstrip failure does not
+prevent crop, trim, or Render.
+
+Real-browser layout regressions cover portrait, landscape, and square artwork in
+pack covers, the grid, the order list, the viewer, albums, the editor, and Render
+Preview at phone and desktop viewport sizes. They use synthetic local fixtures
+and mocked requests, without Telegram credentials or public-network media:
+
+```sh
+cd frontend
+npx playwright install --with-deps chromium
+npm run test:layout
+```
+
+The regular frontend CI runs these checks. For optional screenshots, set
+`LAYOUT_SCREENSHOTS` to an existing output directory before running the command.
+
 ## Обновление зависимостей
 
 `app/requirements.txt`, `backend/requirements.txt`, `tests/requirements.txt` —

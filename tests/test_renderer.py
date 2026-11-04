@@ -81,6 +81,35 @@ class RendererTests(unittest.TestCase):
             return subprocess.run(["ffmpeg","-v","error","-i",str(path),"-map","0:v:0","-c:v","copy","-f","hash","-hash","sha256","-"],capture_output=True,check=True).stdout
         self.assertEqual(video_hash(self.source),video_hash(output))
 
+    def test_large_high_frame_rate_source_gets_a_lightweight_editor_copy(self):
+        source = Path(self.folder.name) / "large.mp4"
+        output = Path(self.folder.name) / "editor.mp4"
+        subprocess.run([
+            "ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+            "testsrc2=size=1920x1080:rate=60", "-t", "1", "-c:v", "libx264",
+            "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", str(source),
+        ], check=True)
+        original = source.read_bytes()
+        normalize(source, output)
+        _, width, height, stream = probe(output, details=True)
+        self.assertLessEqual(max(width, height), 720)
+        self.assertEqual(stream["avg_frame_rate"], "30/1")
+        self.assertLess(output.stat().st_size, len(original))
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_rotated_original_renders_in_the_preview_orientation(self):
+        rotated = Path(self.folder.name) / "rotated.mp4"
+        preview = Path(self.folder.name) / "rotated-preview.mp4"
+        output = Path(self.folder.name) / "rotated.webm"
+        subprocess.run([
+            "ffmpeg", "-y", "-v", "error", "-display_rotation:v:0", "90",
+            "-i", str(self.source), "-c", "copy", str(rotated),
+        ], check=True)
+        normalize(rotated, preview)
+        render(rotated, output, 0, 0.5, "original", 1, .5, .5)
+        self.assertEqual(probe(preview)[1:], (360, 640))
+        self.assertEqual(probe(output)[1:], (288, 512))
+
     def test_invalid_ranges_are_rejected(self):
         for start, end in ((0, 4), (3, 2), (-1, 1), (3.5, 5), (0, .01)):
             with self.subTest(start=start, end=end):

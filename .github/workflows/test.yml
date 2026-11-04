@@ -60,6 +60,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run build
       - run: npm test -- --reporter=default --reporter=junit --outputFile=../test-results/frontend.xml
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:layout
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

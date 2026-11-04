@@ -24,7 +24,7 @@ from backend.main import app
 from backend.routers import stickers, studio
 from backend.security import mini_app_user
 from backend.storage import initialize, database
-from tests.support import FakeTelegram
+from tests.support import FakeTelegram, auth
 
 
 class PreviewTelegram(FakeTelegram):
@@ -96,7 +96,8 @@ BackButton:{show(){},hide(){},onClick(fn){window.qaBack=fn;},offClick(fn){if(win
 
 async def preview_index(request):
     html = (ROOT / "app/webapp/index.html").read_text(encoding="utf-8")
-    html = html.replace('<script src="https://telegram.org/js/telegram-web-app.js"></script>', MOCK_SDK)
+    sdk = MOCK_SDK.replace("'visual-qa'", repr(auth()["X-Telegram-Init-Data"]))
+    html = html.replace('<script src="https://telegram.org/js/telegram-web-app.js"></script>', sdk)
     html = html.replace('</body>', '''<div style="position:fixed;top:0;left:0;right:0;height:100px;background:#1f1f1f;z-index:100;pointer-events:none;font:600 14px sans-serif;color:white"><div style="padding:10px 26px">21:09 <span style="float:right">▰ 26%</span></div><div style="display:flex;justify-content:space-between;padding:12px 16px"><span style="background:#404040;border-radius:24px;padding:8px 14px">✕ Close</span><span style="background:#404040;border-radius:24px;padding:8px 14px">⌄ ···</span></div></div><div style="position:fixed;bottom:6px;left:35%;width:30%;height:4px;background:#ddd;border-radius:4px;z-index:100;pointer-events:none"></div></body>''')
     return HTMLResponse(html)
 

@@ -96,6 +96,10 @@ it("publishes a Studio render and opens the updated Pack order", async () => {
   const renderButton = await screen.findByRole("button", {
     name: /Посмотреть результат/,
   });
+  await waitFor(() => expect(document.getElementById("source-photo")?.getAttribute("src")).toBe("blob:fixture"));
+  const photo = document.getElementById("source-photo")!;
+  Object.defineProperties(photo, { naturalWidth: { value: 640 }, naturalHeight: { value: 400 } });
+  fireEvent.load(photo);
   await waitFor(() =>
     expect((renderButton as HTMLButtonElement).disabled).toBe(false),
   );

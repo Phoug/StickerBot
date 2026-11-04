@@ -26,7 +26,9 @@ def register(
     folder = storage.DATA_DIR / "media"
     folder.mkdir(parents=True, exist_ok=True)
     destination = folder / (media_id + path.suffix)
-    retained_original = destination.with_suffix(".original.webm")
+    retained_original = destination.with_suffix(
+        ".original.webm" if original and original.suffix == ".webm" else ".original"
+    )
     try:
         shutil.move(str(path), destination)
         if original is not None:
@@ -59,8 +61,9 @@ def owned_media(media_id: str, user_id: int, kind: str | None = None) -> dict:
     if kind and row["kind"] != kind:
         raise HTTPException(422, "Некорректный тип файла")
     media = dict(row)
-    original = Path(media["path"]).with_suffix(".original.webm")
-    media["render_path"] = original if original.is_file() else Path(media["path"])
+    path = Path(media["path"])
+    originals = (path.with_suffix(".original.webm"), path.with_suffix(".original"))
+    media["render_path"] = next((p for p in originals if p.is_file()), path)
     return media
 
 
@@ -75,6 +78,7 @@ def cleanup_expired() -> None:
             path = Path(row["path"])
             path.unlink(missing_ok=True)
             path.with_suffix(".original.webm").unlink(missing_ok=True)
+            path.with_suffix(".original").unlink(missing_ok=True)
             db.execute("DELETE FROM media WHERE id=?", (row["id"],))
     cleanup_last_success = time.time()
     cleanup_last_error = False
