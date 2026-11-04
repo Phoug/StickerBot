@@ -49,7 +49,6 @@ export function Editor({
   busy: boolean;
 }) {
   const photo = source.kind === "photo";
-  const { url, ready, failure, frames, retry, attempt, onReady, onError } = useEditorMedia(source);
   const [tool, setTool] = useState(photo ? "crop" : "trim"),
     [size, setSize] = useState({
       w: source.width || 640,
@@ -58,6 +57,11 @@ export function Editor({
     [playing, setPlaying] = useState(false),
     [clock, setClock] = useState(0),
     [span, setSpan] = useState(Math.min(12, source.duration || 1));
+  const viewStart = clamp(edit.start - span / 3, 0, Math.max(0, source.duration - span));
+  const {
+    url, ready, failure, filmstrip, filmstripFailure, retryFilmstrip,
+    onFilmstripError, retry, attempt, onReady, onError,
+  } = useEditorMedia(source, viewStart, span);
   const video = useRef<HTMLVideoElement>(null),
     stage = useRef<HTMLDivElement>(null),
     points = useRef(new Map<number, { x: number; y: number }>()),
@@ -151,11 +155,6 @@ export function Editor({
     points.current.delete(e.pointerId);
     rebase();
   };
-  const viewStart = clamp(
-    edit.start - span / 3,
-    0,
-    Math.max(0, source.duration - span),
-  );
   return (
     <section id="editor" className="screen">
       <div className="editor-heading">
@@ -258,6 +257,9 @@ export function Editor({
                   key={source.id + ":" + attempt}
                   ref={video}
                   preload="auto"
+                  controls={false}
+                  disablePictureInPicture
+                  disableRemotePlayback
                   src={url || undefined}
                   style={mediaStyle}
                   muted
@@ -335,8 +337,14 @@ export function Editor({
             )}
           </div>
           <div className="tool-content">
-            {tool === "trim" && (
-              <div className="tool-panel">
+            {!photo && (
+              <div
+                className="tool-panel"
+                role="tabpanel"
+                aria-labelledby="tab-trim"
+                inert={tool !== "trim"}
+                aria-hidden={tool !== "trim"}
+              >
                 <div className="control-heading">
                   <strong>Выберите момент</strong>
                   <button
@@ -404,22 +412,26 @@ export function Editor({
                     drag.current = null;
                   }}
                 >
-                  <div
-                    className="film-frames"
-                    style={{
-                      width: (source.duration / span) * 100 + "%",
-                      left: (-viewStart / span) * 100 + "%",
-                    }}
-                  >
-                    {frames.map((src, i) => (
-                      <img
-                        key={i}
-                        src={src}
-                        alt=""
-                        style={{ width: "6.25%", objectFit: "cover" }}
-                      />
+                  <div className="film-frames">
+                    {filmstrip && Array.from({ length: 8 }, (_, i) => (
+                      <span className="film-frame" key={i}>
+                        <img
+                          src={filmstrip}
+                          alt={i === 0 ? "Кадры видео" : ""}
+                          draggable={false}
+                          style={{ left: `calc(50% - var(--film-frame-width) * ${i + 0.5})` }}
+                          onError={onFilmstripError}
+                        />
+                      </span>
                     ))}
                   </div>
+                  {!filmstrip && (
+                    <div className="filmstrip-status" onPointerDown={(e) => e.stopPropagation()}>
+                      {filmstripFailure ? (
+                        <button className="text-button" onClick={retryFilmstrip}>Повторить кадры</button>
+                      ) : <span role="status">Кадры загружаются…</span>}
+                    </div>
+                  )}
                   <div
                     className="trim-selection"
                     style={{
@@ -467,76 +479,84 @@ export function Editor({
                 </p>
               </div>
             )}
-            {tool === "crop" && (
-              <div className="tool-panel">
-                <div className="control-heading">
-                  <strong>Настройте кадр</strong>
-                  <button
-                    id="reset-crop"
-                    className="text-button"
-                    onClick={() => change({ zoom: 1, x: 0.5, y: 0.5 })}
-                  >
-                    Сбросить
-                  </button>
-                </div>
-                <p className="hint">
-                  Двигайте изображение. Разведите два пальца для увеличения.
-                </p>
-                <div className="gesture-art">↔ ⤢</div>
-                <div className="zoom-actions">
-                  <button
-                    className="icon-button"
-                    aria-label="Уменьшить"
-                    onClick={() =>
-                      change({ zoom: clamp(edit.zoom / 1.15, 1, 3) })
-                    }
-                  >
-                    −
-                  </button>
-                  <output>{Math.round(edit.zoom * 100)}%</output>
-                  <button
-                    className="icon-button"
-                    aria-label="Увеличить"
-                    onClick={() =>
-                      change({ zoom: clamp(edit.zoom * 1.15, 1, 3) })
-                    }
-                  >
-                    +
-                  </button>
-                </div>
+            <div
+              className="tool-panel"
+              role="tabpanel"
+              aria-labelledby="tab-crop"
+              inert={tool !== "crop"}
+              aria-hidden={tool !== "crop"}
+            >
+              <div className="control-heading">
+                <strong>Настройте кадр</strong>
+                <button
+                  id="reset-crop"
+                  className="text-button"
+                  onClick={() => change({ zoom: 1, x: 0.5, y: 0.5 })}
+                >
+                  Сбросить
+                </button>
               </div>
-            )}
-            {tool === "shape" && (
-              <div className="tool-panel">
-                <strong>Форма стикера</strong>
-                <div className="shapes">
-                  {(["original", "square", "rounded", "circle"] as const).map(
-                    (shape) => (
-                      <button
-                        key={shape}
-                        data-shape={shape}
-                        aria-pressed={shape === edit.shape}
-                        className={shape === edit.shape ? "selected" : ""}
-                        onClick={() => change({ shape })}
-                      >
-                        <i className={"shape-" + shape} />
+              <p className="hint">
+                Двигайте изображение. Разведите два пальца для увеличения.
+              </p>
+              <div className="gesture-art">↔ ⤢</div>
+              <div className="zoom-actions">
+                <button
+                  className="icon-button"
+                  aria-label="Уменьшить"
+                  onClick={() =>
+                    change({ zoom: clamp(edit.zoom / 1.15, 1, 3) })
+                  }
+                >
+                  −
+                </button>
+                <output>{Math.round(edit.zoom * 100)}%</output>
+                <button
+                  className="icon-button"
+                  aria-label="Увеличить"
+                  onClick={() =>
+                    change({ zoom: clamp(edit.zoom * 1.15, 1, 3) })
+                  }
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div
+              className="tool-panel"
+              role="tabpanel"
+              aria-labelledby="tab-shape"
+              inert={tool !== "shape"}
+              aria-hidden={tool !== "shape"}
+            >
+              <strong>Форма стикера</strong>
+              <div className="shapes">
+                {(["original", "square", "rounded", "circle"] as const).map(
+                  (shape) => (
+                    <button
+                      key={shape}
+                      data-shape={shape}
+                      aria-pressed={shape === edit.shape}
+                      className={shape === edit.shape ? "selected" : ""}
+                      onClick={() => change({ shape })}
+                    >
+                      <i className={"shape-" + shape} />
+                      {
                         {
-                          {
-                            original: "Оригинал",
-                            square: "Квадрат",
-                            rounded: "Скругление",
-                            circle: "Круг",
-                          }[shape]
-                        }
-                      </button>
-                    ),
-                  )}
-                </div>
-                <p className="hint">
-                  Оригинал сохраняет пропорции. Остальные формы обрезают кадр.
-                </p>
+                          original: "Оригинал",
+                          square: "Квадрат",
+                          rounded: "Скругление",
+                          circle: "Круг",
+                        }[shape]
+                      }
+                    </button>
+                  ),
+                )}
               </div>
-            )}
+              <p className="hint">
+                Оригинал сохраняет пропорции. Остальные формы обрезают кадр.
+              </p>
+            </div>
           </div>
         </div>
       </div>

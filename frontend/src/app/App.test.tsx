@@ -450,6 +450,8 @@ it("requests an iOS first frame and pauses it until the user chooses playback", 
   Object.defineProperty(player, "videoWidth", { value: 1080 });
   Object.defineProperty(player, "videoHeight", { value: 1920 });
   expect(player.preload).toBe("auto");
+  expect(player.controls).toBe(false);
+  expect(player.hasAttribute("disablepictureinpicture")).toBe(true);
   fireEvent.loadedMetadata(player);
   expect(player.muted).toBe(true);
   expect(play).toHaveBeenCalledOnce();

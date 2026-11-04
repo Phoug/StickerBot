@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Response
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Response, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
@@ -21,7 +21,7 @@ from backend.services.publication import publish_render, user_operation, find_st
 from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
 from backend.services.media.sticker_converter import StickerConversionError
-from backend.services.media.studio_renderer import normalize, render, probe
+from backend.services.media.studio_renderer import normalize, render, probe, make_filmstrip
 from backend.services.media.photo_renderer import normalize_photo, render_photo, is_photo
 from backend.services.media.preview_cache import cached_media
 from backend.storage import database, owned_pack
@@ -247,6 +247,35 @@ async def stream_source(
         media["path"], media_type="video/mp4",
         headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
     )
+
+
+@router.get("/media/{media_id}/filmstrip")
+async def source_filmstrip(
+    media_id: str,
+    start: float = Query(0, ge=0, le=600, allow_inf_nan=False),
+    span: float = Query(12, ge=0.05, le=600, allow_inf_nan=False),
+    user: dict = Depends(mini_app_user),
+) -> Response:
+    media = owned_media(media_id, user["id"])
+    if media["kind"] != "source":
+        raise HTTPException(422, "Нужен видеоисходник")
+    duration = media["duration"]
+    if start > max(0, duration - 0.05) + 1e-9:
+        raise HTTPException(422, "Фрагмент выходит за границы видео")
+    span = min(span, duration - start)
+
+    async def produce() -> tuple[bytes, str]:
+        async with _processing:
+            try:
+                data = await run_in_threadpool(make_filmstrip, media["path"], start, span)
+                return data, "image/jpeg"
+            except StickerConversionError as exc:
+                raise HTTPException(422, str(exc)) from exc
+
+    data, mime = await cached_media(
+        (user["id"], media_id, "filmstrip", start, span), produce,
+    )
+    return Response(data, media_type=mime, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/media/{media_id}")

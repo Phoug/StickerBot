@@ -60,6 +60,28 @@ def normalize(source: Path, output: Path) -> float:
         raise StickerConversionError("Подготовленное видео превышает 50 МБ")
     return probe(output)[0]
 
+
+def make_filmstrip(source: str | Path, start: float, span: float) -> bytes:
+    """Decode the visible timeline once; mobile browsers only load a JPEG."""
+    seek = max(0, start - 1)
+    try:
+        result = run_command([
+            "ffmpeg", "-v", "error", "-protocol_whitelist", "file,pipe",
+            "-format_whitelist", LOCAL_VIDEO_FORMATS, "-ss", str(seek),
+            "-i", str(source), "-map", "0:v:0", "-an", "-vf",
+            "scale=96:64:force_original_aspect_ratio=increase,crop=96:64,setsar=1,"
+            f"tpad=stop_mode=clone:stop_duration={span + 1},trim=start={start - seek},"
+            f"setpts=PTS-STARTPTS,fps=8/{span}:start_time=0,tile=8x1",
+            "-frames:v", "1", "-c:v", "mjpeg", "-q:v", "4",
+            "-f", "image2pipe", "pipe:1",
+        ], capture_output=True, check=True, timeout=30)
+        if not result.stdout:
+            raise StickerConversionError("Не удалось подготовить кадры видео")
+        return result.stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise StickerConversionError("Не удалось подготовить кадры видео") from exc
+
+
 def canvas_size(width, height, shape):
     if shape == "original":
         factor = 512 / max(width, height)
