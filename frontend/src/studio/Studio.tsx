@@ -133,7 +133,7 @@ export function Studio({
           </form>
           <p className="hint">
             Публичное видео, фотопубликация TikTok или прямая ссылка на JPEG,
-            PNG, WebP. Закрытые публикации и трансляции недоступны.
+            PNG, WebP, HEIC/HEIF, AVIF, GIF, BMP или TIFF. Закрытые публикации и трансляции недоступны.
           </p>
           <details className="hint">
             <summary>Поддерживаемые площадки</summary>
@@ -148,10 +148,11 @@ export function Studio({
             <Icon name="gallery" />
             <strong>Выбрать из галереи</strong>
             <span>Фото или видео · до 50 МБ</span>
+            <span>HEIC, JPEG, PNG и другие фото; MOV, MP4, WebM и другие видео. GIF — первый кадр.</span>
             <input
               id="video-file"
               type="file"
-              accept="video/*,image/jpeg,image/png,image/webp"
+              accept="video/*,image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,image/gif,image/bmp,image/tiff,.mov,.mp4,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.mpeg,.mpg,.mts,.m2ts,.ts,.wmv,.asf,.flv,.ogv,.ogg,.vob,.heic,.heif,.avif,.tif,.tiff"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";

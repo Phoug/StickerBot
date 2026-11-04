@@ -110,6 +110,41 @@ class RendererTests(unittest.TestCase):
         self.assertEqual(probe(preview)[1:], (360, 640))
         self.assertEqual(probe(output)[1:], (288, 512))
 
+    def test_common_video_containers_keep_preview_and_render_support(self) -> None:
+        for extension in ("mov", "3gp", "mkv", "avi", "ts", "mts", "m2ts"):
+            with self.subTest(extension=extension):
+                source = Path(self.folder.name) / ("camera." + extension)
+                subprocess.run([
+                    "ffmpeg", "-y", "-v", "error", "-i", str(self.source),
+                    "-t", "0.5", "-an", "-c:v",
+                    "mpeg4" if extension == "avi" else "copy",
+                    *(["-f", "mpegts"] if extension in {"mts", "m2ts"} else []),
+                    str(source),
+                ], check=True)
+                preview = Path(self.folder.name) / (extension + "-preview.mp4")
+                normalize(source, preview)
+                self.assertEqual(probe(preview, details=True)[3]["codec_name"], "h264")
+                output = Path(self.folder.name) / (extension + "-sticker.webm")
+                render(source, output, 0, .2, "original", 1, .5, .5)
+                self.assertEqual(probe(output, details=True)[3]["codec_name"], "vp9")
+
+    def test_iphone_hevc_mov_is_converted_to_browser_h264(self) -> None:
+        source = Path(self.folder.name) / "iphone.mov"
+        subprocess.run([
+            "ffmpeg", "-y", "-v", "error", "-i", str(self.source),
+            "-t", "0.3", "-an", "-c:v", "libx265", "-preset", "ultrafast",
+            "-x265-params", "pools=1:frame-threads=1:log-level=error",
+            "-pix_fmt", "yuv420p10le", "-tag:v", "hvc1", str(source),
+        ], check=True)
+        preview = Path(self.folder.name) / "iphone-preview.mp4"
+        normalize(source, preview)
+        stream = probe(preview, details=True)[3]
+        self.assertEqual(stream["codec_name"], "h264")
+        self.assertEqual(stream["pix_fmt"], "yuv420p")
+        output = Path(self.folder.name) / "iphone-sticker.webm"
+        render(source, output, 0, .2, "original", 1, .5, .5)
+        self.assertLessEqual(output.stat().st_size, 256 * 1024)
+
     def test_invalid_ranges_are_rejected(self):
         for start, end in ((0, 4), (3, 2), (-1, 1), (3.5, 5), (0, .01)):
             with self.subTest(start=start, end=end):

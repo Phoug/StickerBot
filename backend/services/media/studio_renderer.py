@@ -3,13 +3,13 @@ import math
 import subprocess
 from fractions import Fraction
 from pathlib import Path
-from backend.services.media.commands import run_command
+from backend.services.media.commands import LOCAL_VIDEO_FORMATS, run_command
 from backend.services.media.sticker_converter import StickerConversionError, _convert_with_quality_search
 
 def probe(path, details=False):
     try:
         result = run_command(
-            ["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-select_streams", "v:0", "-show_entries",
+            ["ffprobe", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", LOCAL_VIDEO_FORMATS, "-select_streams", "v:0", "-show_entries",
              "stream=width,height,codec_name,pix_fmt,sample_aspect_ratio,bit_rate,avg_frame_rate:stream_side_data=rotation:format=duration", "-of", "json", str(path)],
             capture_output=True, check=True, timeout=20)
         info = json.loads(result.stdout)
@@ -40,7 +40,7 @@ def normalize(source: Path, output: Path) -> float:
     if compatible:
         try:
             run_command(["ffmpeg","-y","-v","error","-protocol_whitelist","file,pipe",
-                            "-format_whitelist","mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv",
+                            "-format_whitelist",LOCAL_VIDEO_FORMATS,
                             "-i",str(source),"-map","0:v:0","-an","-c:v","copy","-movflags","+faststart",str(output)],
                            capture_output=True,check=True,timeout=60)
             if output.stat().st_size <= 50*1024*1024:
@@ -49,7 +49,7 @@ def normalize(source: Path, output: Path) -> float:
             pass
     try:
         run_command(
-            ["ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv", "-i", str(source), "-map", "0:v:0", "-an",
+            ["ffmpeg", "-y", "-v", "error", "-protocol_whitelist", "file,pipe", "-format_whitelist", LOCAL_VIDEO_FORMATS, "-i", str(source), "-map", "0:v:0", "-an",
              "-vf", "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-pix_fmt", "yuv420p",
              "-movflags", "+faststart", "-fs", "52428801", str(output)],

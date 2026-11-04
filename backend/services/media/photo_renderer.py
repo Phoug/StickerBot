@@ -1,19 +1,39 @@
 """Decode local photos, apply EXIF orientation, and keep alpha through editing."""
 import warnings
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 
 from backend.services.media.sticker_converter import StickerConversionError
 from backend.services.media.studio_renderer import canvas_size
 
 
-def normalize_photo(source, output):
+register_heif_opener(thumbnails=False, decode_threads=2)
+PHOTO_FORMATS = {"JPEG", "PNG", "WEBP", "HEIF", "AVIF", "GIF", "BMP", "TIFF"}
+PHOTO_FORMAT_HINT = "JPEG, PNG, WebP, HEIC/HEIF, AVIF, GIF, BMP или TIFF"
+
+
+def is_photo(source: str | Path) -> bool:
+    """Recognize photo bytes even when a gallery sends an unknown MIME type."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(source):
+                return True
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise StickerConversionError("Фото должно быть не больше 40 мегапикселей") from exc
+    except (UnidentifiedImageError, OSError, ValueError):
+        return False
+
+
+def normalize_photo(source: str | Path, output: str | Path) -> tuple[int, int]:
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(source) as image:
-                if image.format not in {"JPEG", "PNG", "WEBP", "HEIF", "HEIC"}:
-                    raise StickerConversionError("Выберите фото JPEG, PNG или WebP")
+                if image.format not in PHOTO_FORMATS:
+                    raise StickerConversionError(f"Выберите фото {PHOTO_FORMAT_HINT}")
                 if image.width * image.height > 40_000_000:
                     raise StickerConversionError("Фото должно быть не больше 40 мегапикселей")
                 image = ImageOps.exif_transpose(image).convert("RGBA")
@@ -21,7 +41,7 @@ def normalize_photo(source, output):
                 image.save(output, "PNG", compress_level=1)
                 return image.size
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
-        raise StickerConversionError("Не удалось открыть фото. Выберите JPEG, PNG или WebP.") from exc
+        raise StickerConversionError(f"Не удалось открыть фото. Выберите {PHOTO_FORMAT_HINT}.") from exc
 
 
 def render_photo(source, output, shape, zoom, x, y):

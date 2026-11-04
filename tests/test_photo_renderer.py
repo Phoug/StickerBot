@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
-from backend.services.media.photo_renderer import normalize_photo, render_photo
+from backend.services.media.photo_renderer import is_photo, normalize_photo, render_photo
 from backend.services.media.sticker_converter import StickerConversionError
 
 
@@ -35,3 +37,37 @@ def test_large_photo_is_rejected_before_decoding_all_pixels(tmp_path):
     Image.new("1", (6400, 6400)).save(source)
     with pytest.raises(StickerConversionError, match="40 мегапикселей"):
         normalize_photo(source, tmp_path / "output.png")
+
+
+@pytest.mark.parametrize("format", ["JPEG", "PNG", "WEBP", "HEIF", "AVIF", "GIF", "BMP", "TIFF"])
+def test_common_photo_formats_are_detected_by_content_and_normalized(
+    tmp_path: Path, format: str,
+) -> None:
+    source = tmp_path / "upload"
+    Image.new("RGB", (120, 80), "orange").save(source, format=format)
+    assert is_photo(source)
+    output = tmp_path / "source.png"
+    assert normalize_photo(source, output) == (120, 80)
+    with Image.open(output) as image:
+        assert image.format == "PNG"
+        assert image.mode == "RGBA"
+        red, green, blue, alpha = image.getpixel((60, 40))
+        assert red > 200 and 100 < green < 200 and blue < 30 and alpha == 255
+
+
+def test_animated_photo_uses_first_frame(tmp_path: Path) -> None:
+    source = tmp_path / "animation.gif"
+    Image.new("RGB", (20, 20), "red").save(
+        source, save_all=True, append_images=[Image.new("RGB", (20, 20), "blue")],
+        duration=100, loop=0,
+    )
+    output = tmp_path / "source.png"
+    normalize_photo(source, output)
+    with Image.open(output) as photo:
+        assert photo.getpixel((10, 10)) == (255, 0, 0, 255)
+
+
+def test_invalid_bytes_are_not_detected_as_photos(tmp_path: Path) -> None:
+    source = tmp_path / "upload"
+    source.write_bytes(b"not an image")
+    assert not is_photo(source)
