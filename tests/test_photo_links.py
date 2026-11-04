@@ -76,3 +76,22 @@ def test_direct_photo_link(client,monkeypatch):
     monkeypatch.setattr(studio,'fetch_public',fetch)
     response=api.post('/api/studio/link',json={'url':'https://cdn.example.com/photo.png'},headers=auth())
     assert response.status_code==201 and response.json()['kind']=='photo'
+
+
+def test_photo_editor_preview_is_small_cached_and_owner_scoped(client, monkeypatch):
+    api, _, folder = client
+    path = folder / "photo.png"
+    Image.new("RGBA", (2000, 1000), (10, 20, 30, 128)).save(path)
+    original = path.read_bytes()
+    media = studio.register(path, 7, "photo", 0)
+    route = "/api/studio/media/" + media["id"]
+    response = api.get(route + "?preview=true", headers=auth())
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/webp"
+    preview = Image.open(BytesIO(response.content))
+    assert preview.size == (1280, 640)
+    assert preview.getpixel((0, 0))[3] == 128
+    assert api.get(route, headers=auth()).content == original
+    monkeypatch.setattr(Image, "open", lambda *args: pytest.fail("Preview should be cached"))
+    assert api.get(route + "?preview=true", headers=auth()).content == response.content
+    assert api.get(route + "?preview=true", headers=auth(8)).status_code == 404

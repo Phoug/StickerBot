@@ -61,14 +61,18 @@ class Publish(BaseModel):
             raise ValueError("Введите один эмодзи")
         return value
 
-def prepare(source, folder, user_id, photo=False):
+def prepare(source: Path, folder: str | Path, user_id: int, photo: bool = False) -> dict:
     if photo:
         output = Path(folder) / "source.png"
         width, height = normalize_photo(source, output)
         return {**register(output, user_id, "photo", 0), "kind": "photo", "width": width, "height": height}
     output = Path(folder) / "source.mp4"
     duration = normalize(source, output)
-    return {**register(output, user_id, "source", duration), "kind": "video"}
+    _, width, height = probe(output)
+    return {
+        **register(output, user_id, "source", duration, original=Path(source)),
+        "kind": "video", "width": width, "height": height,
+    }
 
 @router.post("/upload", status_code=201)
 async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
@@ -90,11 +94,16 @@ async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
     finally:
         await video.close()
 
-def download_source(url, user_id):
+def download_source(url: str, user_id: int) -> dict:
     # A dedicated limited download; legacy bot downloads retain their own behavior.
     from backend.services.media.ytdlp import extract
     with tempfile.TemporaryDirectory(prefix="sticker_link_") as folder:
-        options = _ydl_opts("bv*[height<=1080]+ba/b[height<=1080]", str(Path(folder) / "download.%(ext)s"))
+        options = _ydl_opts(
+            "b[ext=mp4][vcodec^=avc1][height<=720]/"
+            "bv*[ext=mp4][vcodec^=avc1][height<=720]/"
+            "bv*[height<=1080]/b[height<=1080]",
+            str(Path(folder) / "download.%(ext)s"),
+        )
         try:
             extract(url, options, download=True)
             files = list(Path(folder).glob("download.*"))
@@ -170,19 +179,21 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
 @router.get("/media/{media_id}")
 async def get_media(media_id: str, preview: bool = False, thumbnail: bool = False, user=Depends(mini_app_user)):
     media = owned_media(media_id, user["id"])
-    if thumbnail and media["kind"] == "photo":
-        async def photo_thumbnail():
-            def encode():
+    if media["kind"] == "photo" and (thumbnail or preview):
+        async def photo_preview() -> tuple[bytes, str]:
+            def encode() -> tuple[bytes, str]:
                 from io import BytesIO
                 from PIL import Image
                 with Image.open(media["path"]) as image:
-                    image.thumbnail((180,180))
+                    edge = 180 if thumbnail else 1280
+                    image.thumbnail((edge, edge))
                     output = BytesIO()
-                    image.save(output, "WEBP", quality=75)
+                    image.save(output, "WEBP", quality=75 if thumbnail else 85, method=1)
                     return output.getvalue(), "image/webp"
             async with _processing:
                 return await run_in_threadpool(encode)
-        data, mime = await cached_media((user["id"], media_id, "thumbnail"), photo_thumbnail)
+        variant = "thumbnail" if thumbnail else "editor-preview"
+        data, mime = await cached_media((user["id"], media_id, variant), photo_preview)
         return Response(data, media_type=mime, headers={"Cache-Control":"private, no-store"})
     if preview and media["kind"] == "render":
         data, mime = await video_preview(
@@ -242,7 +253,7 @@ async def edit_existing(
                 _edit_sources.pop(cache_key,None)
         data, _ = await cached_media((user["id"], sticker["file_id"]), lambda: telegram.file(sticker["file_id"]))
         with tempfile.TemporaryDirectory(prefix="sticker_edit_") as folder:
-            source = Path(folder) / "original"
+            source = Path(folder) / ("original.webm" if sticker.get("is_video") else "original")
             source.write_bytes(data)
             try:
                 if not sticker.get("is_video"):

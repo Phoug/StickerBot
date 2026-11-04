@@ -18,7 +18,7 @@ def normalize_photo(source, output):
                     raise StickerConversionError("Фото должно быть не больше 40 мегапикселей")
                 image = ImageOps.exif_transpose(image).convert("RGBA")
                 image.thumbnail((2048, 2048), Image.Resampling.LANCZOS)
-                image.save(output, "PNG")
+                image.save(output, "PNG", compress_level=1)
                 return image.size
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise StickerConversionError("Не удалось открыть фото. Выберите JPEG, PNG или WebP.") from exc

@@ -706,7 +706,6 @@ body.editing {
 }
 .crop-stage {
   position: relative;
-  width: min(29dvh, 260px, calc(100vw - 64px));
   height: auto;
   aspect-ratio: 1;
   flex-shrink: 0;
@@ -1087,9 +1086,6 @@ body.editing {
     flex: 1;
     min-height: 0;
   }
-  .crop-stage {
-    width: min(35vw, 43dvh, 360px);
-  }
   .editor-tools {
     margin: 0;
   }
@@ -1138,9 +1134,6 @@ body.editing {
   }
   .editor-heading h1 {
     font-size: 18px;
-  }
-  .crop-stage {
-    width: min(25dvh, 190px);
   }
   .preview-surface {
     padding: 8px;
@@ -1434,9 +1427,6 @@ body.editing {
   flex: 1;
   padding: 12px 10px;
 }
-.crop-stage {
-  width: min(calc(var(--content-height) * 0.29), 260px, calc(100vw - 64px));
-}
 #preview .preview-stage {
   width: min(calc(var(--content-height) * 0.31), 280px, calc(100vw - 64px));
 }
@@ -1462,15 +1452,7 @@ body.viewing {
     padding-left: 2px;
   }
 }
-@media (min-width: 720px) and (min-height: 500px) {
-  .crop-stage {
-    width: min(35vw, calc(var(--content-height) * 0.43), 360px);
-  }
-}
 @media (max-height: 590px) and (max-width: 719px) {
-  .crop-stage {
-    width: min(calc(var(--content-height) * 0.22), 150px);
-  }
   .tool-panel {
     padding: 8px 12px;
   }
@@ -2289,5 +2271,85 @@ label {
   .asset-image,
   .viewer-strip button {
     transition: none;
+  }
+}
+
+/* Fit artwork inside its frame, including intrinsic portrait image sizes. */
+.asset-image,
+.sticker-tile,
+.preview-stage {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.asset-image {
+  overflow: hidden;
+}
+.asset-image img,
+.viewer-media > img,
+.viewer-media > video,
+.preview-stage > img,
+.preview-stage > video {
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+}
+.preview-stage > img,
+.preview-stage > video {
+  grid-area: 1 / 1;
+}
+
+/* The available editing surface determines both portrait and landscape size. */
+#editor .editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(100px, 1fr) 210px;
+}
+#editor .editor-view {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+#editor .preview-surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+  overflow: hidden;
+  padding: 8px;
+}
+.crop-stage {
+  width: min(100cqw, calc(100cqh * var(--crop-ratio, 1)));
+  max-width: 100%;
+  max-height: 100%;
+}
+#editor .editor-tools {
+  min-width: 0;
+  margin: 0;
+}
+#editor .editor-heading {
+  height: 38px;
+}
+#editor .gesture-art {
+  display: none;
+}
+@media (min-width: 720px) {
+  .shell.is-editor {
+    max-width: 1200px;
+  }
+  #editor .editor-layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-rows: minmax(100px, 1fr);
+  }
+}
+@media (max-height: 650px) and (max-width: 719px) {
+  #editor {
+    overflow-y: auto;
+  }
+  #editor .editor-layout {
+    flex-shrink: 0;
+    min-height: 310px;
+    grid-template-rows: minmax(130px, 1fr) 170px;
   }
 }
