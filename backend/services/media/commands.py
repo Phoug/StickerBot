@@ -5,6 +5,8 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 
+LOCAL_VIDEO_FORMATS = "mov,matroska,webm,avi,mpeg,mpegvideo,mpegts,ogg,asf,flv"
+
 _deadline = ContextVar("media_deadline", default=None)
 
 

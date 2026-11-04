@@ -1,6 +1,8 @@
 import aiohttp
 import asyncio
 import tempfile
+import hashlib
+import hmac
 import time
 from pathlib import Path
 from typing import Literal
@@ -12,7 +14,7 @@ from emoji import is_emoji
 from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
 from backend.services.media.sticker_preview import video_preview
 
-from backend.config import MAX_SOURCE_SIZE
+from backend.config import MAX_SOURCE_SIZE, API_SECRET_TOKEN
 from backend.services.media_store import register, owned_media, cleanup_expired
 from backend.services.bot_api import telegram
 from backend.services.publication import publish_render, user_operation, find_sticker
@@ -20,7 +22,7 @@ from backend.security import mini_app_user
 from backend.services.media.downloader import DownloadFailed, _ydl_opts
 from backend.services.media.sticker_converter import StickerConversionError
 from backend.services.media.studio_renderer import normalize, render, probe
-from backend.services.media.photo_renderer import normalize_photo, render_photo
+from backend.services.media.photo_renderer import normalize_photo, render_photo, is_photo
 from backend.services.media.preview_cache import cached_media
 from backend.storage import database, owned_pack
 from backend.services.media.photo_links import validate_url, resolve_tiktok, fetch_public, MAX_BYTES
@@ -28,6 +30,7 @@ from backend.services.media.photo_links import validate_url, resolve_tiktok, fet
 router = APIRouter(prefix="/api/studio", tags=["Sticker editor"])
 _edit_sources = {}
 _link_sources = {}
+_upload_sources: dict[tuple[int, str], dict] = {}
 
 def remember_link(key, result):
     if len(_link_sources)>=64: _link_sources.pop(next(iter(_link_sources)))
@@ -69,6 +72,7 @@ class Publish(BaseModel):
         return value
 
 def prepare(source: Path, folder: str | Path, user_id: int, photo: bool = False) -> dict:
+    photo = is_photo(source) or photo
     if photo:
         output = Path(folder) / "source.png"
         width, height = normalize_photo(source, output)
@@ -89,13 +93,30 @@ async def upload(video: UploadFile = File(...), user=Depends(mini_app_user)):
             with tempfile.TemporaryDirectory(prefix="sticker_upload_") as folder:
                 source = Path(folder) / "upload"
                 size = 0
+                digest = hashlib.sha256()
                 with source.open("wb") as target:
                     while chunk := await video.read(1024 * 1024):
                         size += len(chunk)
                         if size > MAX_SOURCE_SIZE:
                             raise HTTPException(413, "Файл должен быть не больше 50 МБ")
+                        digest.update(chunk)
                         target.write(chunk)
-                return await run_in_threadpool(prepare, source, folder, user["id"], (video.content_type or "").startswith("image/"))
+                key = (user["id"], digest.hexdigest())
+                previous = _upload_sources.get(key)
+                if previous:
+                    try:
+                        owned_media(previous["id"], user["id"])
+                        return previous
+                    except HTTPException:
+                        _upload_sources.pop(key, None)
+                result = await run_in_threadpool(
+                    prepare, source, folder, user["id"],
+                    (video.content_type or "").startswith("image/"),
+                )
+                if len(_upload_sources) >= 64:
+                    _upload_sources.pop(next(iter(_upload_sources)))
+                _upload_sources[key] = result
+                return result
     except StickerConversionError as exc:
         raise HTTPException(422, str(exc)) from exc
     finally:
@@ -152,7 +173,12 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
                         raise
                     photos = []
             if not social:
-                photos = [payload.url.strip()]
+                data, _ = await fetch_public(payload.url.strip(), limit=MAX_SOURCE_SIZE)
+                with tempfile.TemporaryDirectory(prefix="sticker_direct_") as folder:
+                    source = Path(folder) / "download"
+                    source.write_bytes(data)
+                    result = await run_in_threadpool(prepare, source, folder, user["id"])
+                return remember_link(key, result)
             if photos:
                 results = []
                 total = 0
@@ -182,6 +208,46 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
     except (StickerConversionError, DownloadFailed, aiohttp.ClientError, TimeoutError, OSError) as exc:
         message = str(exc) if isinstance(exc, (StickerConversionError, DownloadFailed)) else "Не удалось загрузить файл по ссылке. Попробуйте галерею."
         raise HTTPException(422, message) from exc
+
+def playback_signature(media_id: str, user_id: int, expires: int) -> str:
+    value = f"source-playback:{media_id}:{user_id}:{expires}"
+    return hmac.new(
+        API_SECRET_TOKEN.encode(), value.encode(), hashlib.sha256,
+    ).hexdigest()
+
+
+@router.post("/media/{media_id}/playback")
+async def source_playback(media_id: str, user=Depends(mini_app_user)) -> dict:
+    media = owned_media(media_id, user["id"])
+    if media["kind"] != "source":
+        raise HTTPException(422, "Нужен видеоисходник")
+    # A scoped ticket lets the native player request ranges without exposing initData.
+    expires = int(time.time()) + 3600
+    signature = playback_signature(media_id, user["id"], expires)
+    return {"url": (
+        f"/api/studio/media/{media_id}/stream?user_id={user['id']}"
+        f"&expires={expires}&signature={signature}"
+    )}
+
+
+@router.get("/media/{media_id}/stream")
+async def stream_source(
+    media_id: str, user_id: int, expires: int, signature: str,
+) -> FileResponse:
+    expected = playback_signature(media_id, user_id, expires)
+    if (
+        expires <= time.time() or expires > time.time() + 3600
+        or not hmac.compare_digest(signature.encode(), expected.encode())
+    ):
+        raise HTTPException(401, "Ссылка для просмотра истекла. Откройте видео заново.")
+    media = owned_media(media_id, user_id)
+    if media["kind"] != "source":
+        raise HTTPException(404, "Видео не найдено")
+    return FileResponse(
+        media["path"], media_type="video/mp4",
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
+    )
+
 
 @router.get("/media/{media_id}")
 async def get_media(media_id: str, preview: bool = False, thumbnail: bool = False, user=Depends(mini_app_user)):

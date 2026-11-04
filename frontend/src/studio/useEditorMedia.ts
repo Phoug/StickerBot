@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { mediaURL } from "../api";
+import { mediaURL, sourceVideoURL } from "../api";
 import type { Media } from "../types";
+
+const filmstrips = new Map<string, { created: number; frames: string[] }>();
 
 /** Own browser loading, first-frame readiness and the filmstrip decoder. */
 export function useEditorMedia(source: Media) {
@@ -18,7 +20,7 @@ export function useEditorMedia(source: Media) {
     setFailure("");
     setFrames([]);
     const path = "/api/studio/media/" + source.id + (source.kind === "photo" ? "?preview=true" : "");
-    void mediaURL(path).then(
+    void (source.kind === "photo" ? mediaURL(path) : sourceVideoURL(source.id)).then(
       (value) => { if (live) setURL(value); },
       (error: unknown) => {
         if (live) setFailure(error instanceof Error ? error.message : "Не удалось загрузить файл.");
@@ -30,6 +32,12 @@ export function useEditorMedia(source: Media) {
   useEffect(() => {
     // Show the first frame before spending decoder time on the timeline.
     if (source.kind === "photo" || !url || !ready || failure) return;
+    const cached = filmstrips.get(source.id);
+    if (cached && Date.now() - cached.created < 300000) {
+      setFrames(cached.frames);
+      return;
+    }
+    filmstrips.delete(source.id);
     let live = true;
     let cancelSeek = () => {};
     const video = document.createElement("video");
@@ -67,6 +75,10 @@ export function useEditorMedia(source: Media) {
           thumbnails.push(canvas.toDataURL("image/jpeg", 0.6));
           setFrames([...thumbnails]);
         }
+        if (live) {
+          if (filmstrips.size >= 16) filmstrips.delete(filmstrips.keys().next().value!);
+          filmstrips.set(source.id, { created: Date.now(), frames: [...thumbnails] });
+        }
       } catch {
         // Timeline editing also works without thumbnails.
       }
@@ -80,7 +92,7 @@ export function useEditorMedia(source: Media) {
       video.removeAttribute("src");
       video.load();
     };
-  }, [url, ready, failure, source.kind]);
+  }, [url, ready, failure, source.kind, source.id]);
 
   return {
     url, ready, failure, frames, retry,

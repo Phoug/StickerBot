@@ -115,10 +115,15 @@ def test_delete_draft_and_retry_after_telegram_failure(client):
     pack = create(api).json()
     route = f"/api/packs/{pack['id']}"
     fake.fail_delete = True
+    # An absent remote draft is removed locally without a Telegram delete.
+    assert api.delete(route, headers=auth()).status_code == 204
+    pack = create(api).json()
+    stickers.update_pack(pack["id"], status="ready")
+    route = f"/api/packs/{pack['id']}"
     assert api.delete(route, headers=auth()).status_code == 502
-    assert api.get(route, headers=auth()).status_code == 200
+    assert api.get("/api/packs", headers=auth()).json()["packs"][0]["id"] == pack["id"]
     fake.fail_delete = False
-    # A missing Telegram set is normal for an empty draft or a lost delete response.
+    # A missing Telegram set is normal after a lost delete response.
     assert api.delete(route, headers=auth()).status_code == 204
     assert api.delete(route, headers=auth()).status_code == 404
 

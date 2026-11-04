@@ -104,3 +104,10 @@ export function clearMedia() {
   cache.clear();
 }
 window.addEventListener("beforeunload", clearMedia);
+
+export async function sourceVideoURL(id: string): Promise<string> {
+  const result = await json<{ url: string }>(
+    "/api/studio/media/" + encodeURIComponent(id) + "/playback", {},
+  );
+  return result.url;
+}

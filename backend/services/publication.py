@@ -76,6 +76,8 @@ async def publish_render(
             item["file_unique_id"] == uploaded["file_unique_id"]
             for item in actual["stickers"]
         )
+        if pack["status"] == "draft" and not already_added:
+            raise HTTPException(409, "Ссылка набора уже занята. Создайте набор с другой ссылкой.")
         if replace_id:
             target = next((
                 item for item in actual["stickers"]

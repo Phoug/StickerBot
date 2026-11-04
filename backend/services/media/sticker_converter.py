@@ -3,7 +3,7 @@ import os
 import subprocess
 import tempfile
 from pathlib import Path
-from backend.services.media.commands import run_command, job_deadline
+from backend.services.media.commands import LOCAL_VIDEO_FORMATS, run_command, job_deadline
 
 
 class StickerConversionError(Exception):
@@ -60,7 +60,7 @@ def _encode(
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-ss", f"{start:.3f}",
         *(["-c:v", decoder] if decoder else []),
         "-protocol_whitelist", "file,pipe",
-        "-format_whitelist", "mov,matroska,webm,avi,mpeg,mpegvideo,ogg,asf,flv",
+        "-format_whitelist", LOCAL_VIDEO_FORMATS,
         "-i", input_path, "-t", f"{duration:.3f}", "-vf", filter_chain, "-an",
         "-c:v", "libvpx-vp9", "-pix_fmt", "yuva420p", "-auto-alt-ref", "0",
     ]

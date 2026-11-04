@@ -3,7 +3,7 @@ import re
 import time
 import uuid
 from urllib.parse import urlparse
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from pydantic import BaseModel, Field, field_validator
 from emoji import is_emoji
 from backend.security import mini_app_user
@@ -28,6 +28,7 @@ def cache_previews(pack_id, user_id, actual):
 class CreatePack(BaseModel):
     title: str = Field(min_length=1, max_length=64)
     source: str | None = Field(default=None, max_length=256)
+    short_name: str = Field(default="", max_length=64)
 
 
 class StickerOrder(BaseModel):
@@ -87,8 +88,51 @@ async def list_packs(user=Depends(mini_app_user)):
         rows = db.execute("SELECT * FROM packs WHERE user_id=? ORDER BY created_at DESC", (user["id"],)).fetchall()
     return {"packs": [dict(row) for row in rows]}
 
+async def custom_pack_name(short_name: str) -> tuple[str, str]:
+    me = await telegram.call("getMe")
+    suffix = f"_by_{me['username']}"
+    base = short_name.strip()
+    name = base + suffix
+    if base and (
+        not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", base)
+        or "__" in name or len(name) > 64
+    ):
+        raise HTTPException(
+            422, f"Используйте латинские буквы, цифры и одиночные подчёркивания. "
+            f"Начните с буквы; максимум {64 - len(suffix)} символов, без подчёркивания в конце.",
+        )
+    return name, suffix
+
+
+async def pack_name_available(name: str) -> bool:
+    with database() as db:
+        if db.execute("SELECT 1 FROM packs WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+            return False
+    try:
+        await telegram.call("getStickerSet", name=name)
+    except HTTPException as exc:
+        if "STICKERSET_INVALID" in str(exc.detail):
+            return True
+        raise
+    return False
+
+
+@router.get("/name-availability")
+async def name_availability(
+    response: Response, short_name: str = Query(default="", max_length=64), user: dict = Depends(mini_app_user),
+) -> dict:
+    response.headers["Cache-Control"] = "private, no-store"
+    name, suffix = await custom_pack_name(short_name)
+    return {
+        "name": name if short_name.strip() else None,
+        "suffix": suffix,
+        "max_length": 64 - len(suffix),
+        "available": await pack_name_available(name) if short_name.strip() else None,
+    }
+
+
 @router.post("", status_code=201)
-async def create_pack(payload: CreatePack, user=Depends(mini_app_user)):
+async def create_pack(payload: CreatePack, user: dict = Depends(mini_app_user)) -> dict:
     title = payload.title.strip()
     if not title:
         raise HTTPException(422, "Введите название набора")
@@ -99,10 +143,15 @@ async def create_pack(payload: CreatePack, user=Depends(mini_app_user)):
             raise HTTPException(422, "Импортируются обычные непустые наборы, без масок и custom emoji")
         if len(source["stickers"]) > 120:
             raise HTTPException(422, "В наборе больше 120 стикеров")
-    me = await telegram.call("getMe")
     pack_id = uuid.uuid4().hex
-    name = f"s{pack_id[:20]}_by_{me['username']}"
+    base = payload.short_name.strip() or f"s{pack_id[:20]}"
+    name, _ = await custom_pack_name(base)
+    if not await pack_name_available(name):
+        raise HTTPException(409, "Эта ссылка уже занята. Выберите другую.")
     with database() as db:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT 1 FROM packs WHERE name=? COLLATE NOCASE", (name,)).fetchone():
+            raise HTTPException(409, "Эта ссылка уже занята. Выберите другую.")
         db.execute("INSERT INTO packs(id,user_id,name,title,source_name,status,created_at) VALUES (?,?,?,?,?,?,?)",
                    (pack_id, user["id"], name, title, source_name, "import_pending" if source_name else "draft", time.time()))
     return owned_pack(pack_id, user["id"])
@@ -124,6 +173,10 @@ async def import_pack(pack_id: str, user=Depends(mini_app_user)):
                     raise
                 current = None
             existing = {s["file_unique_id"] for s in current["stickers"]} if current else set()
+            if current and pack["count"] == 0 and existing != {
+                s["file_unique_id"] for s in source["stickers"][:50]
+            }:
+                raise HTTPException(409, "Ссылка набора уже занята. Создайте копию с другой ссылкой.")
             pending = [s for s in source["stickers"] if s["file_unique_id"] not in existing]
             if not current:
                 initial, pending = pending[:50], pending[50:]
@@ -155,11 +208,16 @@ async def delete_pack(pack_id: str, user=Depends(mini_app_user)):
     async with user_operation(user["id"]):
         pack = owned_pack(pack_id, user["id"])
         try:
-            # Also check drafts: Telegram may have accepted an earlier publish/import
-            # whose response was lost before its local status could be updated.
-            deleted = await telegram.call("deleteStickerSet", name=pack["name"])
-            if deleted is not True:
-                raise HTTPException(502, "Telegram не подтвердил удаление набора")
+            # An unconfirmed draft address is not proof of remote ownership.
+            if pack["status"] == "ready" or pack["count"] > 0:
+                deleted = await telegram.call("deleteStickerSet", name=pack["name"])
+                if deleted is not True:
+                    raise HTTPException(502, "Telegram не подтвердил удаление набора")
+            else:
+                await telegram.call("getStickerSet", name=pack["name"])
+                raise HTTPException(
+                    409, "По этой ссылке уже есть набор. Повторите публикацию или импорт перед удалением.",
+                )
         except HTTPException as exc:
             already_absent = any(code in str(exc.detail) for code in ("STICKERSET_INVALID", "STICKERSET_NOT_FOUND"))
             if not already_absent:
