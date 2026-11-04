@@ -38,8 +38,11 @@ Existing Sources without a retained original continue rendering from their
 stored file. No database migration is required.
 
 Photo Sources use a cached WebP Preview up to 1280 pixels; Render still reads
-the normalized, lossless photo. The editor waits for the first decoded frame
-before generating its filmstrip.
+the normalized, lossless photo. The editor streams video Previews with scoped,
+expiring Range URLs and waits for the first decoded frame before generating its filmstrip. Completed filmstrips
+and repeated gallery Source preparation are cached with bounded, private keys.
+See [Source compatibility and caching](media-performance.md) for limits and the
+cache inventory.
 Network and decoding failures expose a retry action. Filmstrip failure does not
 prevent crop, trim, or Render.
 
