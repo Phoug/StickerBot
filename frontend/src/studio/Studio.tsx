@@ -152,7 +152,7 @@ export function Studio({
             <input
               id="video-file"
               type="file"
-              accept="video/*,image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,image/gif,image/bmp,image/tiff,.mov,.mp4,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.mpeg,.mpg,.mts,.m2ts,.ts,.wmv,.asf,.flv,.ogv,.ogg,.vob,.heic,.heif,.avif,.tif,.tiff"
+              accept="video/*,image/jpeg,image/png,image/webp,image/heic,image/heif,image/heic-sequence,image/heif-sequence,image/avif,image/gif,image/bmp,image/tiff,.mov,.mp4,.m4v,.3gp,.3g2,.mkv,.webm,.avi,.mpeg,.mpg,.mts,.m2ts,.ts,.wmv,.asf,.flv,.ogv,.ogg,.vob,.heic,.heif,.avif,.tif,.tiff"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 e.target.value = "";

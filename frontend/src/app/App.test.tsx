@@ -435,3 +435,39 @@ it("shows play/pause feedback only after a tap and hides it afterwards", async (
     { timeout: 1500 },
   );
 });
+
+it("requests an iOS first frame and pauses it until the user chooses playback", async () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const view = render(<Editor
+    source={{ id: "iphone", kind: "video", duration: 3, width: 1080, height: 1920 }}
+    edit={{ source_id: "iphone", start: 0, end: 3, shape: "original", zoom: 1, x: 0.5, y: 0.5 }}
+    onChange={vi.fn()} onRender={vi.fn()} busy={false}
+  />);
+  await waitFor(() => expect(document.getElementById("source-video")?.getAttribute("src")).toBe("/private/source-stream"));
+  const player = document.getElementById("source-video") as HTMLVideoElement;
+  Object.defineProperty(player, "videoWidth", { value: 1080 });
+  Object.defineProperty(player, "videoHeight", { value: 1920 });
+  expect(player.preload).toBe("auto");
+  fireEvent.loadedMetadata(player);
+  expect(player.muted).toBe(true);
+  expect(play).toHaveBeenCalledOnce();
+  expect((document.getElementById("render") as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.loadedData(player);
+  expect(pause).toHaveBeenCalledOnce();
+  expect((document.getElementById("render") as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Воспроизвести" }));
+  expect(play).toHaveBeenCalledTimes(2);
+  fireEvent.error(player);
+  fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+  await waitFor(() => {
+    expect(document.getElementById("source-video")).not.toBe(player);
+    expect(document.getElementById("source-video")?.getAttribute("src")).toBe("/private/source-stream");
+  });
+  expect((document.getElementById("render") as HTMLButtonElement).disabled).toBe(true);
+  view.unmount();
+  play.mockRestore();
+  pause.mockRestore();
+  load.mockRestore();
+});

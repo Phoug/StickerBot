@@ -30,6 +30,16 @@ export function useEditorMedia(source: Media) {
   }, [source.id, source.kind, attempt]);
 
   useEffect(() => {
+    if (ready || failure) return;
+    const timer = setTimeout(() => {
+      setFailure(source.kind === "photo"
+        ? "Фото не загрузилось. Проверьте соединение и повторите загрузку."
+        : "Видео не загрузилось. Нажмите ▶ или повторите загрузку.");
+    }, 30000);
+    return () => clearTimeout(timer);
+  }, [source.id, source.kind, attempt, ready, failure]);
+
+  useEffect(() => {
     // Show the first frame before spending decoder time on the timeline.
     if (source.kind === "photo" || !url || !ready || failure) return;
     const cached = filmstrips.get(source.id);
@@ -95,8 +105,8 @@ export function useEditorMedia(source: Media) {
   }, [url, ready, failure, source.kind, source.id]);
 
   return {
-    url, ready, failure, frames, retry,
-    onReady: () => setReady(true),
+    url, ready, failure, frames, retry, attempt,
+    onReady: () => { setReady(true); setFailure(""); },
     onError: () => setFailure("Не удалось открыть файл. Повторите загрузку или выберите другой файл."),
   };
 }
