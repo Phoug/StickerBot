@@ -60,3 +60,32 @@ it("defers filmstrip decoding until the first frame and releases the decoder on 
   expect(pause).toHaveBeenCalledOnce();
   expect(load).toHaveBeenCalledOnce();
 });
+
+
+it("reuses a completed filmstrip when returning from Render Preview", async () => {
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/filmstrip-stream");
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,frame");
+  const create = vi.spyOn(document, "createElement");
+  const source = { id: "cached-filmstrip", kind: "video" as const, duration: 3 };
+  const first = renderHook(() => useEditorMedia(source));
+  await waitFor(() => expect(first.result.current.url).toBe("/private/filmstrip-stream"));
+  act(() => first.result.current.onReady());
+  const decoder = create.mock.results.find((_, i) => create.mock.calls[i][0] === "video")!.value as HTMLVideoElement;
+  Object.defineProperty(decoder, "duration", { value: 3 });
+  Object.defineProperty(decoder, "currentTime", {
+    set() { queueMicrotask(() => decoder.dispatchEvent(new Event("seeked"))); },
+  });
+  await act(async () => decoder.dispatchEvent(new Event("loadedmetadata")));
+  await waitFor(() => expect(first.result.current.frames).toHaveLength(16));
+  first.unmount();
+  const second = renderHook(() => useEditorMedia(source));
+  await waitFor(() => expect(second.result.current.url).toBe("/private/filmstrip-stream"));
+  act(() => second.result.current.onReady());
+  await waitFor(() => expect(second.result.current.frames).toHaveLength(16));
+  expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(1);
+});
