@@ -110,3 +110,22 @@ it("ends a stalled first-frame wait and recovers when the user starts playback",
   expect(result.current.failure).toBe("");
   vi.useRealTimers();
 });
+
+it("ends a stalled first-frame wait and recovers when the user starts playback", async () => {
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/stalled-stream");
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const { result } = renderHook(() => useEditorMedia({ id: "stalled", kind: "video", duration: 3 }));
+  await waitFor(() => expect(result.current.url).toBe("/private/stalled-stream"));
+  vi.useFakeTimers();
+  // Retry starts a new loading deadline.
+  act(() => result.current.retry());
+  await act(async () => {});
+  act(() => vi.advanceTimersByTime(30000));
+  expect(result.current.failure).toContain("Нажмите ▶");
+  expect(result.current.ready).toBe(false);
+  act(() => result.current.onReady());
+  expect(result.current.ready).toBe(true);
+  expect(result.current.failure).toBe("");
+  vi.useRealTimers();
+});
