@@ -59,6 +59,7 @@ try {
         if (path.endsWith("/edit") || path === "/api/studio/link" || path === "/api/studio/upload") {
           return route.fulfill({ json: { id: "source", kind, duration: 0.5, width: mediaWidth, height: mediaHeight } });
         }
+        if (path.endsWith("/playback")) return route.fulfill({ json: { url: "/api/studio/media/source/stream" } });
         if (path === "/api/studio/render") return route.fulfill({ json: { id: "render", kind, duration: 0.5 } });
         if (kind === "video" && (path.startsWith("/api/studio/media/") || path.endsWith("/file"))) {
           return route.fulfill({ contentType: "video/mp4", body: video });

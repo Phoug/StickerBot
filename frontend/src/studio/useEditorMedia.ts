@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { mediaURL } from "../api";
+import { mediaURL, sourceVideoURL } from "../api";
 import type { Media } from "../types";
 
 /** Own browser loading, first-frame readiness and the filmstrip decoder. */
@@ -18,7 +18,7 @@ export function useEditorMedia(source: Media) {
     setFailure("");
     setFrames([]);
     const path = "/api/studio/media/" + source.id + (source.kind === "photo" ? "?preview=true" : "");
-    void mediaURL(path).then(
+    void (source.kind === "photo" ? mediaURL(path) : sourceVideoURL(source.id)).then(
       (value) => { if (live) setURL(value); },
       (error: unknown) => {
         if (live) setFailure(error instanceof Error ? error.message : "Не удалось загрузить файл.");

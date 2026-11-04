@@ -1,6 +1,8 @@
 import aiohttp
 import asyncio
 import tempfile
+import hashlib
+import hmac
 import time
 from pathlib import Path
 from typing import Literal
@@ -12,7 +14,7 @@ from emoji import is_emoji
 from backend.services.processing import media_capacity as _processing, run_blocking as run_in_threadpool
 from backend.services.media.sticker_preview import video_preview
 
-from backend.config import MAX_SOURCE_SIZE
+from backend.config import MAX_SOURCE_SIZE, API_SECRET_TOKEN
 from backend.services.media_store import register, owned_media, cleanup_expired
 from backend.services.bot_api import telegram
 from backend.services.publication import publish_render, user_operation, find_sticker
@@ -182,6 +184,46 @@ async def from_link(payload: SourceURL, user=Depends(mini_app_user)):
     except (StickerConversionError, DownloadFailed, aiohttp.ClientError, TimeoutError, OSError) as exc:
         message = str(exc) if isinstance(exc, (StickerConversionError, DownloadFailed)) else "Не удалось загрузить файл по ссылке. Попробуйте галерею."
         raise HTTPException(422, message) from exc
+
+def playback_signature(media_id: str, user_id: int, expires: int) -> str:
+    value = f"source-playback:{media_id}:{user_id}:{expires}"
+    return hmac.new(
+        API_SECRET_TOKEN.encode(), value.encode(), hashlib.sha256,
+    ).hexdigest()
+
+
+@router.post("/media/{media_id}/playback")
+async def source_playback(media_id: str, user=Depends(mini_app_user)) -> dict:
+    media = owned_media(media_id, user["id"])
+    if media["kind"] != "source":
+        raise HTTPException(422, "Нужен видеоисходник")
+    # A scoped ticket lets the native player request ranges without exposing initData.
+    expires = int(time.time()) + 3600
+    signature = playback_signature(media_id, user["id"], expires)
+    return {"url": (
+        f"/api/studio/media/{media_id}/stream?user_id={user['id']}"
+        f"&expires={expires}&signature={signature}"
+    )}
+
+
+@router.get("/media/{media_id}/stream")
+async def stream_source(
+    media_id: str, user_id: int, expires: int, signature: str,
+) -> FileResponse:
+    expected = playback_signature(media_id, user_id, expires)
+    if (
+        expires <= time.time() or expires > time.time() + 3600
+        or not hmac.compare_digest(signature.encode(), expected.encode())
+    ):
+        raise HTTPException(401, "Ссылка для просмотра истекла. Откройте видео заново.")
+    media = owned_media(media_id, user_id)
+    if media["kind"] != "source":
+        raise HTTPException(404, "Видео не найдено")
+    return FileResponse(
+        media["path"], media_type="video/mp4",
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
+    )
+
 
 @router.get("/media/{media_id}")
 async def get_media(media_id: str, preview: bool = False, thumbnail: bool = False, user=Depends(mini_app_user)):

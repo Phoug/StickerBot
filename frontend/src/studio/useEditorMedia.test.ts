@@ -1,13 +1,14 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { mediaURL } from "../api";
+import { mediaURL, sourceVideoURL } from "../api";
 import { useEditorMedia } from "./useEditorMedia";
 
-vi.mock("../api", () => ({ mediaURL: vi.fn() }));
+vi.mock("../api", () => ({ mediaURL: vi.fn(), sourceVideoURL: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.mocked(mediaURL).mockReset();
+  vi.mocked(sourceVideoURL).mockReset();
 });
 
 it("keeps the Source loading until the first image or video frame is ready", async () => {
@@ -44,13 +45,15 @@ it("ignores a stale Source that finishes after another Source was selected", asy
 });
 
 it("defers filmstrip decoding until the first frame and releases the decoder on exit", async () => {
-  vi.mocked(mediaURL).mockResolvedValue("blob:video");
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/range-stream");
   const create = vi.spyOn(document, "createElement");
   const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
   const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
   const { result, unmount } = renderHook(() => useEditorMedia({ id: "video", kind: "video", duration: 3 }));
-  await waitFor(() => expect(result.current.url).toBe("blob:video"));
+  await waitFor(() => expect(result.current.url).toBe("/private/range-stream"));
   expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(0);
+  expect(mediaURL).not.toHaveBeenCalled();
+  expect(sourceVideoURL).toHaveBeenCalledWith("video");
   act(() => result.current.onReady());
   expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(1);
   unmount();

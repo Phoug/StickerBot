@@ -25,6 +25,7 @@ vi.mock("../api", () => ({
   json: vi.fn(),
   request: vi.fn(),
   mediaURL: vi.fn(async () => "blob:fixture"),
+  sourceVideoURL: vi.fn(async () => "/private/source-stream"),
   invalidateCover: vi.fn(),
   clearMedia: vi.fn(),
 }));
