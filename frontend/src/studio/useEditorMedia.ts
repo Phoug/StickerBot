@@ -2,15 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { mediaURL, sourceVideoURL } from "../api";
 import type { Media } from "../types";
 
-const filmstrips = new Map<string, { created: number; frames: string[] }>();
-
-/** Own browser loading, first-frame readiness and the filmstrip decoder. */
-export function useEditorMedia(source: Media) {
+/** Own Source loading and the visible timeline Preview. */
+export function useEditorMedia(source: Media, start = 0, span = Math.min(12, source.duration)) {
   const [url, setURL] = useState("");
   const [ready, setReady] = useState(false);
   const [failure, setFailure] = useState("");
   const [attempt, setAttempt] = useState(0);
-  const [frames, setFrames] = useState<string[]>([]);
+  const [filmstrip, setFilmstrip] = useState("");
+  const [filmstripFailure, setFilmstripFailure] = useState(false);
+  const [filmstripAttempt, setFilmstripAttempt] = useState(0);
+  const retryFilmstrip = useCallback(() => setFilmstripAttempt((n) => n + 1), []);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
@@ -18,7 +19,6 @@ export function useEditorMedia(source: Media) {
     setURL("");
     setReady(false);
     setFailure("");
-    setFrames([]);
     const path = "/api/studio/media/" + source.id + (source.kind === "photo" ? "?preview=true" : "");
     void (source.kind === "photo" ? mediaURL(path) : sourceVideoURL(source.id)).then(
       (value) => { if (live) setURL(value); },
@@ -40,72 +40,25 @@ export function useEditorMedia(source: Media) {
   }, [source.id, source.kind, attempt, ready, failure]);
 
   useEffect(() => {
-    // Show the first frame before spending decoder time on the timeline.
-    if (source.kind === "photo" || !url || !ready || failure) return;
-    const cached = filmstrips.get(source.id);
-    if (cached && Date.now() - cached.created < 300000) {
-      setFrames(cached.frames);
-      return;
-    }
-    filmstrips.delete(source.id);
+    setFilmstrip("");
+    setFilmstripFailure(false);
+    if (source.kind === "photo" || !ready || failure) return;
     let live = true;
-    let cancelSeek = () => {};
-    const video = document.createElement("video");
-    video.muted = true;
-    video.playsInline = true;
-    const thumbnails: string[] = [];
-    video.onloadedmetadata = async () => {
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = 96;
-        canvas.height = 64;
-        const context = canvas.getContext("2d");
-        if (!context) return;
-        for (let i = 0; i < 16 && live; i++) {
-          await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => finish(false), 5000);
-            const finish = (ok: boolean) => {
-              clearTimeout(timer);
-              video.onseeked = null;
-              video.onerror = null;
-              cancelSeek = () => {};
-              if (ok) resolve();
-              else reject(Error("Filmstrip seek cancelled"));
-            };
-            cancelSeek = () => finish(false);
-            video.onseeked = () => finish(true);
-            video.onerror = () => finish(false);
-            video.currentTime = Math.max(0, Math.min(
-              video.duration - 0.01,
-              ((i + 0.5) * video.duration) / 16,
-            ));
-          });
-          if (!live) return;
-          context.drawImage(video, 0, 0, 96, 64);
-          thumbnails.push(canvas.toDataURL("image/jpeg", 0.6));
-          setFrames([...thumbnails]);
-        }
-        if (live) {
-          if (filmstrips.size >= 16) filmstrips.delete(filmstrips.keys().next().value!);
-          filmstrips.set(source.id, { created: Date.now(), frames: [...thumbnails] });
-        }
-      } catch {
-        // Timeline editing also works without thumbnails.
-      }
-    };
-    video.src = url;
-    return () => {
-      live = false;
-      cancelSeek();
-      video.onloadedmetadata = null;
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
-    };
-  }, [url, ready, failure, source.kind, source.id]);
+    // Avoid decoding a new timeline for every pointer move while trimming.
+    const timer = setTimeout(() => {
+      const path = "/api/studio/media/" + encodeURIComponent(source.id)
+        + "/filmstrip?start=" + start + "&span=" + span;
+      void mediaURL(path).then(
+        (value) => { if (live) setFilmstrip(value); },
+        () => { if (live) setFilmstripFailure(true); },
+      );
+    }, 200);
+    return () => { live = false; clearTimeout(timer); };
+  }, [source.id, source.kind, ready, failure, start, span, filmstripAttempt]);
 
   return {
-    url, ready, failure, frames, retry, attempt,
+    url, ready, failure, filmstrip, filmstripFailure, retryFilmstrip, retry, attempt,
+    onFilmstripError: () => { setFilmstrip(""); setFilmstripFailure(true); },
     onReady: () => { setReady(true); setFailure(""); },
     onError: () => setFailure("Не удалось открыть файл. Повторите загрузку или выберите другой файл."),
   };

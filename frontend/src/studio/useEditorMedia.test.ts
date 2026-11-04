@@ -45,50 +45,51 @@ it("ignores a stale Source that finishes after another Source was selected", asy
   expect(result.current.url).toBe("blob:second");
 });
 
-it("defers filmstrip decoding until the first frame and releases the decoder on exit", async () => {
+it("loads the visible filmstrip after the first frame without another video decoder", async () => {
   vi.mocked(sourceVideoURL).mockResolvedValue("/private/range-stream");
+  vi.mocked(mediaURL).mockResolvedValue("blob:filmstrip");
   const create = vi.spyOn(document, "createElement");
-  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-  const load = vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
-  const { result, unmount } = renderHook(() => useEditorMedia({ id: "video", kind: "video", duration: 3 }));
+  const { result } = renderHook(() => useEditorMedia({ id: "video", kind: "video", duration: 120 }, 4, 6));
   await waitFor(() => expect(result.current.url).toBe("/private/range-stream"));
-  expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(0);
   expect(mediaURL).not.toHaveBeenCalled();
-  expect(sourceVideoURL).toHaveBeenCalledWith("video");
   act(() => result.current.onReady());
-  expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(1);
-  unmount();
-  expect(pause).toHaveBeenCalledOnce();
-  expect(load).toHaveBeenCalledOnce();
+  await waitFor(() => expect(result.current.filmstrip).toBe("blob:filmstrip"));
+  expect(mediaURL).toHaveBeenCalledWith("/api/studio/media/video/filmstrip?start=4&span=6");
+  expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(0);
 });
 
+it("ignores stale filmstrip responses after the visible window changes", async () => {
+  let resolve!: (url: string) => void;
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/range-stream");
+  vi.mocked(mediaURL).mockImplementation((path) => path.includes("start=0&")
+    ? new Promise<string>((done) => { resolve = done; })
+    : Promise.resolve("blob:later-window"));
+  const { result, rerender } = renderHook(({ start }) =>
+    useEditorMedia({ id: "video", kind: "video", duration: 120 }, start, 12), {
+      initialProps: { start: 0 },
+    });
+  await waitFor(() => expect(result.current.url).toBe("/private/range-stream"));
+  act(() => result.current.onReady());
+  await waitFor(() => expect(mediaURL).toHaveBeenCalledOnce());
+  rerender({ start: 12 });
+  await waitFor(() => expect(result.current.filmstrip).toBe("blob:later-window"));
+  await act(async () => resolve("blob:stale-window"));
+  expect(result.current.filmstrip).toBe("blob:later-window");
+});
 
-it("reuses a completed filmstrip when returning from Render Preview", async () => {
-  vi.mocked(sourceVideoURL).mockResolvedValue("/private/filmstrip-stream");
-  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
-  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
-  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    drawImage: vi.fn(),
-  } as unknown as CanvasRenderingContext2D);
-  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/jpeg;base64,frame");
-  const create = vi.spyOn(document, "createElement");
-  const source = { id: "cached-filmstrip", kind: "video" as const, duration: 3 };
-  const first = renderHook(() => useEditorMedia(source));
-  await waitFor(() => expect(first.result.current.url).toBe("/private/filmstrip-stream"));
-  act(() => first.result.current.onReady());
-  const decoder = create.mock.results.find((_, i) => create.mock.calls[i][0] === "video")!.value as HTMLVideoElement;
-  Object.defineProperty(decoder, "duration", { value: 3 });
-  Object.defineProperty(decoder, "currentTime", {
-    set() { queueMicrotask(() => decoder.dispatchEvent(new Event("seeked"))); },
-  });
-  await act(async () => decoder.dispatchEvent(new Event("loadedmetadata")));
-  await waitFor(() => expect(first.result.current.frames).toHaveLength(16));
-  first.unmount();
-  const second = renderHook(() => useEditorMedia(source));
-  await waitFor(() => expect(second.result.current.url).toBe("/private/filmstrip-stream"));
-  act(() => second.result.current.onReady());
-  await waitFor(() => expect(second.result.current.frames).toHaveLength(16));
-  expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(1);
+it("retries filmstrip failure without reloading or disabling the editable Source", async () => {
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/range-stream");
+  vi.mocked(mediaURL).mockRejectedValueOnce(Error("Busy")).mockResolvedValue("blob:recovered");
+  const { result } = renderHook(() => useEditorMedia({ id: "video", kind: "video", duration: 3 }));
+  await waitFor(() => expect(result.current.url).toBe("/private/range-stream"));
+  act(() => result.current.onReady());
+  await waitFor(() => expect(result.current.filmstripFailure).toBe(true));
+  expect(result.current.ready).toBe(true);
+  expect(result.current.failure).toBe("");
+  act(() => result.current.retryFilmstrip());
+  await waitFor(() => expect(result.current.filmstrip).toBe("blob:recovered"));
+  expect(result.current.filmstripFailure).toBe(false);
+  expect(sourceVideoURL).toHaveBeenCalledOnce();
 });
 
 it("ends a stalled first-frame wait and recovers when the user starts playback", async () => {

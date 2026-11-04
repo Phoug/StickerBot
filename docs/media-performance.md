@@ -44,15 +44,34 @@ download or HEVC transcoding time. No device latency measurements are claimed.
 
 ## Editor controls
 
-The tool panel sizes to its content instead of a fixed-height scrolling area.
+All tool panels share one grid cell and reserve the tallest panel's height.
+Inactive panels remain in layout but are invisible, inert and hidden from assistive
+technology. Switching tabs therefore preserves the preview and crop bounds.
 Shape labels wrap within equal-width columns. Short viewports use compact
 controls and hide the app brand bar so the preview and action remain visible.
 Browser layout checks visit every tool tab at 320–1024 px widths, including
 landscape, and assert that text, buttons and panels fit without scrolling.
+The editor has one video element, native controls are suppressed, and the custom
+playback timer remains a single visible element on every tab.
 
 `npm run test:layout` uses Chromium. To also check WebKit, install its browser
 and system dependencies with `npx playwright install --with-deps webkit`, then
 run `LAYOUT_BROWSER=webkit npm run test:layout` from `frontend/`.
+
+## Timeline frames
+
+After the first Source frame, the editor requests an authenticated JPEG filmstrip
+for the visible `start` and `span` (up to 12 seconds initially). FFmpeg samples
+eight frames from the normalized H.264 Preview into one 768×64 image. Tiles crop
+their frame centers without stretching people or objects. Seeking begins one
+second earlier; cloned final frames cover sub-frame windows near the end.
+No second HTML video element or browser canvas decoder is created.
+
+Window changes are debounced for 200 ms and stale responses are ignored. The
+server checks ownership, expiry and finite window bounds before looking up its
+shared Preview cache. Only the cache producer occupies media capacity, including
+after HTTP disconnection. A failed timeline exposes a separate retry and leaves
+crop, trim and Render available. A retry does not restart the Source player.
 
 ## Cache inventory
 
@@ -63,13 +82,13 @@ run `LAYOUT_BROWSER=webkit npm run test:layout` from `frontend/`.
 | Link Sources | User + URL, 5 minutes, 64 entries | Source ownership, file and expiry |
 | Editable copies of existing stickers | User + Pack + sticker file, 128 entries | Fresh membership and Source ownership/expiry |
 | Repeated gallery Sources | User + SHA-256 of input bytes, 64 entries | Source ownership, file and expiry before reuse |
-| Editor filmstrips | Immutable Source ID, 5 minutes, 16 completed filmstrips | Incomplete/failed decoding is never cached |
+| Editor filmstrips | User + Source + visible window; shared 5 minute / 32 MB / 256 entry Preview cache and browser Blob cache | Ownership and expiry before serving; failures are not cached |
 | Last Render | Current Studio + complete edit settings | Changed settings or Source replace the cached result |
 
 Repeated uploads still transfer the input, but skip normalization and retaining
 another original. Caches are process-local and remain suitable for one backend
 worker. They do not extend Source lifetimes. Filmstrip caching avoids another
-16 seeks when returning from Render Preview to the same editor.
+FFmpeg decode when returning to the same timeline window.
 
 Further candidates: cache bot identity (`getMe`) with a short TTL and reset on
 transport close; consider retained Source reuse across sessions only if repeat

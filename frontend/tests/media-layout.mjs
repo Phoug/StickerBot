@@ -60,6 +60,9 @@ try {
         if (path.endsWith("/edit") || path === "/api/studio/link" || path === "/api/studio/upload") {
           return route.fulfill({ json: { id: "source", kind, duration: 0.5, width: mediaWidth, height: mediaHeight } });
         }
+        if (path.endsWith("/filmstrip")) {
+          return route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="768" height="64"><rect x="0" width="96" height="64" fill="#39719f"/><rect x="96" width="96" height="64" fill="#618e73"/><rect x="192" width="96" height="64" fill="#8e7761"/><rect x="288" width="96" height="64" fill="#71618e"/><rect x="384" width="96" height="64" fill="#61838e"/><rect x="480" width="96" height="64" fill="#8e616c"/><rect x="576" width="96" height="64" fill="#778e61"/><rect x="672" width="96" height="64" fill="#616b8e"/></svg>' });
+        }
         if (path.endsWith("/playback")) return route.fulfill({ json: { url: "/api/studio/media/source/stream" } });
         if (path === "/api/studio/render") return route.fulfill({ json: { id: "render", kind, duration: 0.5 } });
         if (kind === "video" && (path.startsWith("/api/studio/media/") || path.endsWith("/file"))) {
@@ -94,15 +97,32 @@ try {
       const surface = await page.locator(".preview-surface").boundingBox();
       // Portrait media must use the available height, not a 150–260px cap.
       if (mediaHeight > mediaWidth) assert(stage.height >= surface.height - 20, "Portrait editor does not use its available height");
+      if (kind === "video") {
+        await page.locator(".film-frames img").first().evaluate((image) => image.decode());
+        assert.equal(await page.locator("#editor video").count(), 1, "Editor has another video decoder");
+        assert.equal(await page.locator("#source-video").evaluate((v) => v.controls), false);
+        if (process.env.LAYOUT_SCREENSHOTS && width === 390) {
+          await page.screenshot({ path: process.env.LAYOUT_SCREENSHOTS + "/editor-timeline.png" });
+        }
+      }
       for (const tab of kind === "video" ? ["trim", "crop", "shape"] : ["crop", "shape"]) {
         await page.locator("#tab-" + tab).click();
+        const currentSurface = await page.locator(".preview-surface").boundingBox();
+        const currentStage = await page.locator("#crop-stage").boundingBox();
+        for (const dimension of ["x", "y", "width", "height"]) {
+          assert(Math.abs(currentSurface[dimension] - surface[dimension]) < 1,
+            `Preview ${dimension} changes on ${tab} at ${width}×${height}`);
+          assert(Math.abs(currentStage[dimension] - stage[dimension]) < 1,
+            `Crop ${dimension} changes on ${tab} at ${width}×${height}`);
+        }
+        if (kind === "video") assert.equal(await page.locator(".play-time:visible").count(), 1, "Video timer is duplicated");
         const overflow = await page.locator(".editor-tools").evaluate((tools) => {
-          const elements = [tools, ...tools.querySelectorAll(".tool-content, .tool-panel, .hint, .shapes, .shapes button")];
+          const elements = [tools, ...tools.querySelectorAll(".tool-content, .tool-panel[aria-hidden=false], .tool-panel[aria-hidden=false] .hint, .tool-panel[aria-hidden=false] .shapes, .tool-panel[aria-hidden=false] .shapes button")];
           return elements.filter((e) => e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1)
             .map((e) => e.className);
         });
         assert.deepEqual(overflow, [], `Editor ${tab} content overflows at ${width}×${height}`);
-        await contained(page, ".tool-panel", ".editor-tools");
+        await contained(page, ".tool-panel[aria-hidden=false]", ".editor-tools");
         await contained(page, ".editor-tools", "#editor");
         await contained(page, "#render", ".shell");
         const editor = await page.locator("#editor").evaluate((e) => ({ height: e.clientHeight, scroll: e.scrollHeight }));
