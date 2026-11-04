@@ -84,3 +84,31 @@ def test_repeat_upload_reuses_preparation_but_checks_owner_and_expiry(client, mo
         db.execute("UPDATE media SET created_at=0 WHERE id=?", (first["id"],))
     assert upload(7)["id"] != first["id"]
     assert calls == [7, 8, 7]
+
+
+@pytest.mark.parametrize("mime", ["image/heif", "image/heic-sequence", "application/octet-stream", ""])
+def test_iphone_heif_upload_is_decoded_and_rendered(client, mime: str) -> None:
+    api, _, _ = client
+    data = BytesIO()
+    Image.new("RGB", (80, 120), "orange").save(data, "HEIF")
+    response = api.post(
+        "/api/studio/upload", files={"video": ("IMG_0001.HEIC", data.getvalue(), mime)},
+        headers=auth(),
+    )
+    assert response.status_code == 201, response.text
+    source = response.json()
+    assert source["kind"] == "photo"
+    assert (source["width"], source["height"]) == (80, 120)
+    rendered = api.post("/api/studio/render", json={
+        "source_id": source["id"], "start": 0, "end": 1,
+    }, headers=auth())
+    assert rendered.status_code == 201, rendered.text
+
+
+def test_damaged_heif_without_mime_reports_photo_error(client) -> None:
+    api, _, _ = client
+    response = api.post("/api/studio/upload", files={
+        "video": ("camera", b"\x00\x00\x00\x18ftypheic" + b"\x00" * 12, "application/octet-stream"),
+    }, headers=auth())
+    assert response.status_code == 422
+    assert "фото" in response.json()["detail"]

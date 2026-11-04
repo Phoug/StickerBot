@@ -7,6 +7,7 @@ vi.mock("../api", () => ({ mediaURL: vi.fn(), sourceVideoURL: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   vi.mocked(mediaURL).mockReset();
   vi.mocked(sourceVideoURL).mockReset();
 });
@@ -88,4 +89,23 @@ it("reuses a completed filmstrip when returning from Render Preview", async () =
   act(() => second.result.current.onReady());
   await waitFor(() => expect(second.result.current.frames).toHaveLength(16));
   expect(create.mock.calls.filter(([tag]) => tag === "video")).toHaveLength(1);
+});
+
+it("ends a stalled first-frame wait and recovers when the user starts playback", async () => {
+  vi.mocked(sourceVideoURL).mockResolvedValue("/private/stalled-stream");
+  vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  const { result } = renderHook(() => useEditorMedia({ id: "stalled", kind: "video", duration: 3 }));
+  await waitFor(() => expect(result.current.url).toBe("/private/stalled-stream"));
+  vi.useFakeTimers();
+  // Retry starts a new loading deadline.
+  act(() => result.current.retry());
+  await act(async () => {});
+  act(() => vi.advanceTimersByTime(30000));
+  expect(result.current.failure).toContain("Нажмите ▶");
+  expect(result.current.ready).toBe(false);
+  act(() => result.current.onReady());
+  expect(result.current.ready).toBe(true);
+  expect(result.current.failure).toBe("");
+  vi.useRealTimers();
 });

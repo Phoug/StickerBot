@@ -14,8 +14,10 @@ by generated integration fixtures. These container names do not imply that
 arbitrary damaged or proprietary codecs work. Network protocols remain disabled
 inside FFmpeg; direct links use the bounded public HTTPS downloader instead.
 
-Limits remain 50 MB per upload, 10 minutes and 4096×4096 for video, and 40 MP
-for photos. HEVC conversion preserves the original for Render. HDR tone mapping
+Limits remain 50 MB per upload, 10 minutes and 4096×4096 for video, and 64 MP
+for photos, including 48 MP iPhone captures. Photos are downscaled before RGBA
+conversion to avoid retaining a full-resolution four-channel copy. HEVC conversion
+preserves the original for Render. HDR tone mapping
 is not implemented. Real iPhone/Android captures need a device smoke test.
 
 ## First frame
@@ -29,8 +31,28 @@ ownership; expired or deleted Sources remain inaccessible. Responses use
 `private, no-store`. The ticket is a temporary capability for this Preview only;
 keep query strings out of proxy access logs. Retry obtains a fresh ticket.
 
+The editor explicitly requests `preload="auto"` and starts muted inline playback
+when metadata arrives, then pauses at the first decoded frame. This avoids
+waiting on metadata-only preloading in iOS WebKit. If autoplay is blocked, the
+play button can start decoding through a user gesture. After 30 seconds without
+a decoded frame, the editor offers retry instead of an endless spinner; a late
+first frame clears the error. Retry remounts the player even if its URL repeats.
+See [WebKit's video loading policy](https://webkit.org/blog/6784/new-video-policies-for-ios/).
+
 This removes the full-download wait after preparation; it does not remove upload,
 download or HEVC transcoding time. No device latency measurements are claimed.
+
+## Editor controls
+
+The tool panel sizes to its content instead of a fixed-height scrolling area.
+Shape labels wrap within equal-width columns. Short viewports use compact
+controls and hide the app brand bar so the preview and action remain visible.
+Browser layout checks visit every tool tab at 320–1024 px widths, including
+landscape, and assert that text, buttons and panels fit without scrolling.
+
+`npm run test:layout` uses Chromium. To also check WebKit, install its browser
+and system dependencies with `npx playwright install --with-deps webkit`, then
+run `LAYOUT_BROWSER=webkit npm run test:layout` from `frontend/`.
 
 ## Cache inventory
 

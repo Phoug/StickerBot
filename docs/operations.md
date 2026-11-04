@@ -253,3 +253,36 @@ Telegram changes made after that snapshot are not rolled back.
 и тома; второй poller production-токена не запускается. Согласуйте допустимую
 потерю данных и время восстановления, затем измерьте их на учебном восстановлении.
 Очистку старых Docker-образов выполняйте с сохранением нужных версий и томов.
+
+## Codex project-safe in WSL
+
+The user-level `project-safe` permission profile grants project writes, tool
+reads, DNS, localhost networking and access to the Docker Desktop socket. It
+denies reading `.env` at the workspace root and in nested directories. The
+Windows-app and Linux-CLI configurations live in different Codex homes; keep
+their permission profiles consistent. Select `project-safe` for a new chat.
+
+Project `.codex/config.toml` disables dotenv loading during agent checks, keeps
+package caches in `~/.cache/stickerbot`, and selects the project environment and
+Node.js 22 installed under `.cache/toolchain`. Both paths are symlinks into
+`~/.cache/stickerbot` on the Linux filesystem to avoid slow package installation
+on `/mnt/c`. The profile permits writes to that tool directory. To recreate them
+in a fresh checkout after installing system Python 3.14, its venv package and FFmpeg:
+
+```sh
+mkdir -p ~/.cache/stickerbot .cache
+python3 -m venv ~/.cache/stickerbot/venv
+ln -s ~/.cache/stickerbot/venv .venv
+.venv/bin/python -m pip install -r requirements.lock -r tests/requirements.lock
+npm install --prefix ~/.cache/stickerbot/toolchain --no-save --no-audit --no-fund node@22
+ln -s ~/.cache/stickerbot/toolchain .cache/toolchain
+```
+
+Compose reads `env_file` on the client, so a normal production-style `compose up`
+with `.env` is intentionally blocked inside this profile. Start credentialed
+containers from your own terminal; the agent can then inspect their health and
+logs. Credential-free diagnostics must use `--env-file /dev/null` and an
+override that resets both services' `env_file` lists.
+
+Docker daemon access is privileged: `.env` denials protect direct sandbox file
+reads, but are not a security boundary against Docker operations.

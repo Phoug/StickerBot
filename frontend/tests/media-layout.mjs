@@ -1,14 +1,15 @@
 // Real-browser regression checks for intrinsic media sizes and the editor canvas.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { host: "127.0.0.1", port: 0 } });
 await server.listen();
 const address = server.httpServer.address();
 const base = `http://127.0.0.1:${address.port}`;
-const browser = await chromium.launch();
+const engine = process.env.LAYOUT_BROWSER === "webkit" ? webkit : chromium;
+const browser = await engine.launch();
 const video = await readFile(new URL("fixtures/portrait.mp4", import.meta.url));
 const pack = {
   id: "p", title: "Test pack", name: "test_by_bot", status: "ready", count: 1,
@@ -32,7 +33,7 @@ async function contained(page, selector, frameSelector) {
 }
 
 try {
-  for (const [width, height] of [[390, 844], [360, 560], [1024, 768]]) {
+  for (const [width, height] of [[320, 568], [390, 844], [360, 560], [844, 390], [1024, 768]]) {
     for (const [mediaWidth, mediaHeight, kind] of [[120, 1200, "photo"], [1200, 120, "photo"], [512, 512, "photo"], [64, 512, "video"]]) {
       const context = await browser.newContext({ viewport: { width, height }, reducedMotion: "reduce" });
       const page = await context.newPage();
@@ -93,6 +94,20 @@ try {
       const surface = await page.locator(".preview-surface").boundingBox();
       // Portrait media must use the available height, not a 150–260px cap.
       if (mediaHeight > mediaWidth) assert(stage.height >= surface.height - 20, "Portrait editor does not use its available height");
+      for (const tab of kind === "video" ? ["trim", "crop", "shape"] : ["crop", "shape"]) {
+        await page.locator("#tab-" + tab).click();
+        const overflow = await page.locator(".editor-tools").evaluate((tools) => {
+          const elements = [tools, ...tools.querySelectorAll(".tool-content, .tool-panel, .hint, .shapes, .shapes button")];
+          return elements.filter((e) => e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1)
+            .map((e) => e.className);
+        });
+        assert.deepEqual(overflow, [], `Editor ${tab} content overflows at ${width}×${height}`);
+        await contained(page, ".tool-panel", ".editor-tools");
+        await contained(page, ".editor-tools", "#editor");
+        await contained(page, "#render", ".shell");
+        const editor = await page.locator("#editor").evaluate((e) => ({ height: e.clientHeight, scroll: e.scrollHeight }));
+        assert(editor.scroll <= editor.height + 1, `Editor scrolls at ${width}×${height}`);
+      }
       await page.locator("#tab-shape").click();
       await page.getByRole("button", { name: "Квадрат", exact: true }).click();
       const square = await contained(page, "#crop-stage", ".preview-surface");

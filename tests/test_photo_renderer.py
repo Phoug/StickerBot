@@ -34,8 +34,8 @@ def test_photo_shapes_preserve_alpha_and_telegram_dimensions(tmp_path, shape):
 
 def test_large_photo_is_rejected_before_decoding_all_pixels(tmp_path):
     source = tmp_path / "large.png"
-    Image.new("1", (6400, 6400)).save(source)
-    with pytest.raises(StickerConversionError, match="40 мегапикселей"):
+    Image.new("1", (8100, 8100)).save(source)
+    with pytest.raises(StickerConversionError, match="64 мегапикселей"):
         normalize_photo(source, tmp_path / "output.png")
 
 
@@ -71,3 +71,12 @@ def test_invalid_bytes_are_not_detected_as_photos(tmp_path: Path) -> None:
     source = tmp_path / "upload"
     source.write_bytes(b"not an image")
     assert not is_photo(source)
+
+
+def test_iphone_48mp_photo_is_downscaled_for_editing(tmp_path: Path) -> None:
+    source = tmp_path / "camera.png"
+    Image.new("L", (8064, 6048), 128).save(source)
+    output = tmp_path / "source.png"
+    assert normalize_photo(source, output) == (2048, 1536)
+    with Image.open(output) as image:
+        assert image.getpixel((100, 100)) == (128, 128, 128, 255)

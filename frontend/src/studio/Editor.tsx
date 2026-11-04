@@ -49,7 +49,7 @@ export function Editor({
   busy: boolean;
 }) {
   const photo = source.kind === "photo";
-  const { url, ready, failure, frames, retry, onReady, onError } = useEditorMedia(source);
+  const { url, ready, failure, frames, retry, attempt, onReady, onError } = useEditorMedia(source);
   const [tool, setTool] = useState(photo ? "crop" : "trim"),
     [size, setSize] = useState({
       w: source.width || 640,
@@ -255,7 +255,9 @@ export function Editor({
               ) : (
                 <video
                   id="source-video"
+                  key={source.id + ":" + attempt}
                   ref={video}
+                  preload="auto"
                   src={url || undefined}
                   style={mediaStyle}
                   muted
@@ -265,9 +267,18 @@ export function Editor({
                       w: e.currentTarget.videoWidth,
                       h: e.currentTarget.videoHeight,
                     });
-                    e.currentTarget.currentTime = edit.start;
+                    const player = e.currentTarget;
+                    player.currentTime = edit.start;
+                    // iOS may preload metadata only; muted play requests a decoded frame.
+                    player.muted = true;
+                    void player.play().catch(() => {
+                      // The play button remains available when autoplay is blocked.
+                    });
                   }}
-                  onLoadedData={onReady}
+                  onLoadedData={(e) => {
+                    if (!ready) e.currentTarget.pause();
+                    onReady();
+                  }}
                   onError={onError}
                   onPlay={() => setPlaying(true)}
                   onPause={() => setPlaying(false)}
@@ -286,13 +297,14 @@ export function Editor({
               <button
                 id="play"
                 className="icon-button"
+                disabled={!url}
                 aria-label={playing ? "Пауза" : "Воспроизвести"}
                 onClick={() => {
                   const v = video.current!;
                   if (!v.paused) v.pause();
                   else {
                     v.currentTime = edit.start;
-                    void v.play().catch(() => {});
+                    void v.play().catch(onError);
                   }
                 }}
               >
