@@ -17,9 +17,12 @@ A local draft does not create or reserve an empty Telegram set: Telegram require
 at least one initial sticker. Availability may change before the first
 Publication or import. Those operations reject unrelated existing contents;
 Publication still reconciles a previously uploaded sticker after a lost response.
-Deleting an unconfirmed empty draft removes its local record without deleting an
-existing remote set. After an ambiguous create response, retry Publication or
-import before deleting if the remote set should also be removed.
+Deleting an unconfirmed empty draft checks Telegram first. If the remote set
+exists, deletion returns a conflict and preserves both records: retry Publication
+or import to reconcile an ambiguous create response, then delete the confirmed
+Pack. If the remote set is absent, only the local draft is removed. An unrelated
+remote collision also blocks draft deletion until the conflict is resolved;
+the application never deletes that set merely because its address matches.
 
 Source: [Telegram Bot API: createNewStickerSet](https://core.telegram.org/bots/api#createnewstickerset),
 checked 2026-11-04. Telegram remains authoritative when creating the set.

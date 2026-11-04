@@ -115,7 +115,7 @@ def test_delete_draft_and_retry_after_telegram_failure(client):
     pack = create(api).json()
     route = f"/api/packs/{pack['id']}"
     fake.fail_delete = True
-    # A draft has no confirmed Telegram set, so deleting it is purely local.
+    # An absent remote draft is removed locally without a Telegram delete.
     assert api.delete(route, headers=auth()).status_code == 204
     pack = create(api).json()
     stickers.update_pack(pack["id"], status="ready")

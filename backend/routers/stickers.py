@@ -213,6 +213,11 @@ async def delete_pack(pack_id: str, user=Depends(mini_app_user)):
                 deleted = await telegram.call("deleteStickerSet", name=pack["name"])
                 if deleted is not True:
                     raise HTTPException(502, "Telegram не подтвердил удаление набора")
+            else:
+                await telegram.call("getStickerSet", name=pack["name"])
+                raise HTTPException(
+                    409, "По этой ссылке уже есть набор. Повторите публикацию или импорт перед удалением.",
+                )
         except HTTPException as exc:
             already_absent = any(code in str(exc.detail) for code in ("STICKERSET_INVALID", "STICKERSET_NOT_FOUND"))
             if not already_absent:

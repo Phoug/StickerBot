@@ -95,7 +95,8 @@ def test_empty_draft_cannot_delete_an_occupied_remote_address(client):
     pack = api.post("/api/packs", json={"title": "Pack", "short_name": "cats"}, headers=auth()).json()
     foreign = {"stickers": [fake.sticker({"sticker": "foreign", "format": "static", "emoji_list": ["🙂"]})]}
     fake.sets[pack["name"]] = foreign
-    assert api.delete(f"/api/packs/{pack['id']}", headers=auth()).status_code == 204
+    assert api.delete(f"/api/packs/{pack['id']}", headers=auth()).status_code == 409
+    assert api.get(f"/api/packs/{pack['id']}", headers=auth()).status_code == 200
     assert fake.deleted == []
     assert fake.sets[pack["name"]] == foreign
 
@@ -134,8 +135,14 @@ def test_custom_publication_recovers_a_lost_create_response(client, monkeypatch)
     route = f"/api/studio/packs/{pack['id']}/publish"
     payload = {"render_id": media["id"], "emoji": "🙂"}
     assert api.post(route, json=payload, headers=auth()).status_code == 502
+    pack_route = f"/api/packs/{pack['id']}"
+    assert api.delete(pack_route, headers=auth()).status_code == 409
+    assert api.get(pack_route, headers=auth()).status_code == 200
+    assert pack["name"] in fake.sets
     assert api.post(route, json=payload, headers=auth()).status_code == 200
     assert fake.created == 1 and fake.added == 0
+    assert api.delete(pack_route, headers=auth()).status_code == 204
+    assert pack["name"] not in fake.sets
 
 
 def test_custom_import_recovers_a_lost_initial_create_response(client, monkeypatch):
@@ -159,5 +166,11 @@ def test_custom_import_recovers_a_lost_initial_create_response(client, monkeypat
     monkeypatch.setattr(fake, "call", lose_response)
     route = f"/api/packs/{pack['id']}/import"
     assert api.post(route, headers=auth()).status_code == 502
+    pack_route = f"/api/packs/{pack['id']}"
+    assert api.delete(pack_route, headers=auth()).status_code == 409
+    assert api.get(pack_route, headers=auth()).status_code == 200
+    assert pack["name"] in fake.sets
     assert api.post(route, headers=auth()).status_code == 200
     assert fake.created == 1 and fake.added == 0
+    assert api.delete(pack_route, headers=auth()).status_code == 204
+    assert pack["name"] not in fake.sets
