@@ -34,7 +34,14 @@ def remember_link(key, result):
     _link_sources[key] = (time.monotonic()+300,result)
     return result
 
-SOCIAL_HOSTS = {"youtube.com", "youtu.be", "instagram.com", "tiktok.com", "vk.com", "vkvideo.ru", "twitter.com", "x.com", "reddit.com", "v.redd.it", "facebook.com", "fb.watch", "vimeo.com", "rutube.ru", "ok.ru"}
+SOCIAL_HOSTS = {
+    "youtube.com", "youtu.be", "instagram.com", "tiktok.com",
+    "vk.com", "vk.ru", "vkvideo.ru", "twitter.com", "x.com",
+    "reddit.com", "v.redd.it", "facebook.com", "fb.watch",
+    "vimeo.com", "rutube.ru", "ok.ru", "twitch.tv",
+    "dailymotion.com", "dai.ly", "pinterest.com", "pin.it",
+    "bilibili.com", "b23.tv", "bsky.app", "streamable.com", "coub.com",
+}
 
 class SourceURL(BaseModel):
     url: str = Field(max_length=2048)

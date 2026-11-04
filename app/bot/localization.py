@@ -6,7 +6,9 @@ MESSAGES = {
             "<b>Видео Загрузчик и Стикер Бот</b>\n\n"
             "Отправьте ссылку на видео, чтобы скачать его в оригинальном качестве.\n\n"
             "<b>Поддерживаемые платформы:</b>\n"
-            "YouTube, TikTok, Instagram, X/Twitter.\n\n"
+            "YouTube, TikTok, Instagram, X/Twitter, VK/VK Video, OK, Rutube, "
+            "Reddit, Facebook, Vimeo, Twitch, Dailymotion, Pinterest, Bilibili, "
+            "Bluesky, Streamable, Coub.\n\n"
             "Вы также можете отправить видео напрямую с командой <code>/sticker</code> в подписи "
             "или ответить командой <code>/sticker</code> на видео."
         ),
@@ -49,7 +51,9 @@ MESSAGES = {
             "<b>Video Downloader & Sticker Bot</b>\n\n"
             "Send a video link to download it in original quality.\n\n"
             "<b>Supported platforms:</b>\n"
-            "YouTube, TikTok, Instagram, X/Twitter.\n\n"
+            "YouTube, TikTok, Instagram, X/Twitter, VK/VK Video, OK, Rutube, "
+            "Reddit, Facebook, Vimeo, Twitch, Dailymotion, Pinterest, Bilibili, "
+            "Bluesky, Streamable, Coub.\n\n"
             "You can also upload a video file directly with <code>/sticker</code> in the caption, "
             "or reply to an existing video with <code>/sticker</code>."
         ),

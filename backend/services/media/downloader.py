@@ -19,6 +19,15 @@ EXTRACTOR_ALIASES: dict[str, str] = {
     "facebook": "facebook",
     "reddit": "reddit",
     "twitch": "twitch",
+    "vk": "vk",
+    "rutube": "rutube",
+    "odnoklassniki": "ok",
+    "dailymotion": "dailymotion",
+    "pinterest": "pinterest",
+    "bilibili": "bilibili",
+    "bsky": "bluesky",
+    "streamable": "streamable",
+    "coub": "coub",
 }
 BASE_YDL_OPTIONS: dict[str, Any] = {
     "quiet": True,
@@ -61,7 +70,7 @@ def _sanitize_filename(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", name)
     name = re.sub(r"\s+", " ", name)
     name = name.rstrip(". ")
-    return name[:180] or "video"
+    return name.encode("utf-8")[:180].decode("utf-8", errors="ignore") or "video"
 
 
 def _build_format_selector(format_id: str | None) -> str:
@@ -107,7 +116,7 @@ def download_to_file(
             raise DownloadFailed("yt-dlp returned empty metadata")
         output_path = _find_output_file(temp_dir)
         extension = output_path.suffix.lstrip(".").lower()
-        base_name = _sanitize_filename(name) if name else _source_name(info)
+        base_name = _sanitize_filename(name or str(info.get("title") or _source_name(info)))
         filename = f"{base_name}.{extension}"
         mime_type = MIME_TYPES.get(output_path.suffix.lower(), "application/octet-stream")
         return output_path, filename, mime_type

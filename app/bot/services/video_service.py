@@ -1,6 +1,7 @@
 import logging
 import tempfile
 from html import escape as html_quote
+from pathlib import Path
 
 from aiogram.types import FSInputFile, Message
 
@@ -12,21 +13,8 @@ logger = logging.getLogger("telegram_bot.video")
 
 
 async def process_video_download(message: Message, url: str, tr) -> None:
-    status_message = await message.answer(tr("analyzing_link"))
+    status_message = await message.answer(tr("downloading"))
     try:
-        info = await backend_client.get_json("/info", {"url": url})
-        title = html_quote(info.get("title") or "Video")
-        uploader = html_quote(info.get("uploader") or "")
-        source = html_quote(
-            info.get("extractor_key")
-            or info.get("extractor")
-            or tr("unknown_source")
-        )
-        lines = [f"<b>{title}</b>", f"{tr('source')}: {source}"]
-        if uploader:
-            lines.append(f"{tr('author')}: {uploader}")
-        lines.append(f"\n{tr('downloading')}")
-        await status_message.edit_text("\n".join(lines))
         with tempfile.TemporaryDirectory(prefix="telegram_video_") as temp_dir:
             filename, output_path, size = await backend_client.download_url_to_file(
                 url,
@@ -35,6 +23,7 @@ async def process_video_download(message: Message, url: str, tr) -> None:
             )
             if size > MAX_TELEGRAM_UPLOAD_SIZE:
                 raise RuntimeError(tr("limit_exceeded"))
+            title = html_quote(Path(filename).stem)
             await message.answer_document(
                 document=FSInputFile(output_path, filename=filename),
                 caption=f"<b>{title}</b>\n{format_size(size)}",

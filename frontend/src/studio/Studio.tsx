@@ -132,9 +132,17 @@ export function Studio({
             <button className="button wide">Загрузить</button>
           </form>
           <p className="hint">
-            Видео из соцсетей, фотопубликации TikTok или прямая ссылка на JPEG,
-            PNG, WebP.
+            Публичное видео, фотопубликация TikTok или прямая ссылка на JPEG,
+            PNG, WebP. Закрытые публикации и трансляции недоступны.
           </p>
+          <details className="hint">
+            <summary>Поддерживаемые площадки</summary>
+            <p>
+              YouTube, TikTok, Instagram, X, VK и VK Video, OK, Rutube,
+              Reddit, Facebook, Vimeo, Twitch, Dailymotion, Pinterest,
+              Bilibili, Bluesky, Streamable, Coub.
+            </p>
+          </details>
           <div className="divider">или с устройства</div>
           <label className="upload-box">
             <Icon name="gallery" />
